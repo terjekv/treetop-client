@@ -8,7 +8,7 @@ use secrecy::{ExposeSecret, SecretString};
 /// - Zeroizes the memory on drop
 /// - Displays `[REDACTED]` in `Debug` output
 ///
-/// The inner value is only accessible within the crate via [`expose`](UploadToken::expose).
+/// The inner value is only accessible within the crate via an `expose` method.
 #[derive(Clone)]
 pub struct UploadToken(SecretString);
 
