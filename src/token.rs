@@ -2,6 +2,8 @@
 
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::types::ValidationError;
+
 /// A secret token used to authenticate policy uploads to a Treetop server.
 ///
 /// The token value is stored using [`SecretString`], which:
@@ -18,9 +20,34 @@ impl UploadToken {
         Self(token.into().into())
     }
 
+    /// Creates an upload token after validating that it can be sent as an HTTP header value.
+    pub fn try_new(token: impl Into<String>) -> Result<Self, ValidationError> {
+        let token = Self::new(token);
+        token.validate()?;
+        Ok(token)
+    }
+
+    /// Validates that this token is non-empty and safe to place in an HTTP header.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let value = self.expose();
+        if value.is_empty() || reqwest::header::HeaderValue::from_str(value).is_err() {
+            Err(ValidationError::InvalidUploadToken)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Exposes the raw token value. Crate-internal only.
     pub(crate) fn expose(&self) -> &str {
         self.0.expose_secret()
+    }
+
+    /// Produces a sensitive header value after [`validate`](Self::validate) has succeeded.
+    pub(crate) fn header_value(&self) -> reqwest::header::HeaderValue {
+        let mut header = reqwest::header::HeaderValue::try_from(self.expose())
+            .expect("validated upload tokens are valid HTTP header values");
+        header.set_sensitive(true);
+        header
     }
 }
 
@@ -46,5 +73,17 @@ mod tests {
     fn expose_returns_original_value() {
         let token = UploadToken::new("my-token");
         assert_eq!(token.expose(), "my-token");
+    }
+
+    #[test]
+    fn try_new_rejects_invalid_header_values() {
+        assert!(UploadToken::try_new("").is_err());
+        assert!(UploadToken::try_new("bad\nheader").is_err());
+    }
+
+    #[test]
+    fn request_header_is_marked_sensitive() {
+        let token = UploadToken::try_new("my-token").unwrap();
+        assert!(token.header_value().is_sensitive());
     }
 }

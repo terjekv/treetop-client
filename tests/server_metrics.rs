@@ -7,6 +7,7 @@ use serial_test::serial;
 use treetop_client::AuthorizeRequest;
 
 fn counter_value(metrics: &str, name: &str, labels: &[(&str, &str)]) -> u64 {
+    let mut total = 0;
     for line in metrics.lines() {
         if !(line.starts_with(&format!("{name}{{")) || line.starts_with(&format!("{name} "))) {
             continue;
@@ -16,16 +17,16 @@ fn counter_value(metrics: &str, name: &str, labels: &[(&str, &str)]) -> u64 {
             .iter()
             .all(|(key, value)| line.contains(&format!(r#"{key}="{value}""#)))
         {
-            return line
+            total += line
                 .split_whitespace()
                 .last()
                 .expect("metric line should end with a numeric value")
-                .parse()
+                .parse::<u64>()
                 .expect("metric value should parse as u64");
         }
     }
 
-    0
+    total
 }
 
 #[tokio::test]

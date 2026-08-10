@@ -217,7 +217,7 @@ async fn authorize_with_attributes() {
         User::new("alice"),
         Action::new("create"),
         Resource::new("Host", "web-01")
-            .with_attr("ip", AttrValue::Ip("10.0.0.1".to_string()))
+            .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap())
             .with_attr("critical", AttrValue::Bool(true)),
     ));
     let resp = client.authorize(&batch).await.unwrap();
@@ -250,19 +250,15 @@ async fn authorize_with_context_sends_context() {
 
     let mut context = std::collections::HashMap::new();
     context.insert("env".to_string(), AttrValue::String("prod".to_string()));
-    let batch = AuthorizeRequest {
-        requests: vec![
-            treetop_client::AuthRequest::with_id(
-                "ctx-1",
-                Request::new(
-                    User::new("alice"),
-                    Action::new("view"),
-                    Resource::new("Doc", "1"),
-                ),
-            )
-            .with_context(context),
-        ],
-    };
+    let batch = AuthorizeRequest::from_auth_requests([treetop_client::AuthRequest::with_id(
+        "ctx-1",
+        Request::new(
+            User::new("alice"),
+            Action::new("view"),
+            Resource::new("Doc", "1"),
+        ),
+    )
+    .with_context(context)]);
 
     let resp = client.authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 1);
@@ -401,10 +397,10 @@ async fn is_allowed_returns_error_on_failed_result() {
         .await
         .unwrap_err();
     match err {
-        TreetopError::Api { message, .. } => {
+        TreetopError::Evaluation(message) => {
             assert!(message.contains("invalid principal format"));
         }
-        _ => panic!("expected Api error"),
+        _ => panic!("expected Evaluation error"),
     }
 }
 
@@ -415,7 +411,7 @@ async fn is_allowed_returns_error_on_failed_result() {
 #[tokio::test]
 async fn correlation_id_sent_as_header() {
     let (server, client) = setup().await;
-    let traced = client.with_correlation_id("req-abc-123");
+    let traced = client.with_correlation_id("req-abc-123").unwrap();
 
     Mock::given(method("GET"))
         .and(path("/api/v1/health"))
@@ -448,7 +444,7 @@ async fn builder_correlation_id_sent_on_all_requests() {
 #[tokio::test]
 async fn without_correlation_id_removes_header() {
     let (server, client) = setup().await;
-    let traced = client.with_correlation_id("temp-id");
+    let traced = client.with_correlation_id("temp-id").unwrap();
     let untraced = traced.without_correlation_id();
 
     Mock::given(method("GET"))
@@ -1165,7 +1161,7 @@ fn into_results_gives_ownership() {
 #[test]
 fn authorize_request_default_is_empty() {
     let req = AuthorizeRequest::default();
-    assert!(req.requests.is_empty());
+    assert!(req.requests().is_empty());
 }
 
 #[test]
@@ -1176,8 +1172,13 @@ fn authorize_request_from_requests_iterator() {
         Request::new(User::new("c"), Action::new("v"), Resource::new("D", "3")),
     ];
     let batch = AuthorizeRequest::from_requests(requests);
-    assert_eq!(batch.requests.len(), 3);
-    assert!(batch.requests.iter().all(|r| r.id.is_none()));
+    assert_eq!(batch.requests().len(), 3);
+    assert!(
+        batch
+            .requests()
+            .iter()
+            .all(|request| request.id().is_none())
+    );
 }
 
 // ==========================================================================
@@ -1300,12 +1301,12 @@ fn auth_request_without_id_omits_id_field() {
 #[test]
 fn resource_with_attr_overwrites_duplicate_key() {
     let resource = Resource::new("Host", "web-01")
-        .with_attr("ip", AttrValue::Ip("10.0.0.1".to_string()))
-        .with_attr("ip", AttrValue::Ip("192.168.1.1".to_string()));
+        .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap())
+        .with_attr("ip", AttrValue::ip("192.168.1.1").unwrap());
 
-    assert_eq!(resource.attrs.len(), 1);
+    assert_eq!(resource.attrs().len(), 1);
     assert_eq!(
-        resource.attrs.get("ip"),
-        Some(&AttrValue::Ip("192.168.1.1".to_string()))
+        resource.attr("ip"),
+        Some(&AttrValue::ip("192.168.1.1").unwrap())
     );
 }

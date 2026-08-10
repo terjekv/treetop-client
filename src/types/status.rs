@@ -64,11 +64,15 @@ impl Default for RequestLimits {
 /// Why request context evaluation is currently not schema-backed.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum RequestContextFallbackReason {
     /// No schema is currently uploaded.
     NoSchema,
     /// The uploaded schema is incompatible with the active policy set.
     SchemaIncompatible,
+    /// A fallback reason introduced by a newer server version.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Runtime request-context capability reported by the server.
@@ -227,5 +231,12 @@ mod tests {
             status.fallback_reason,
             Some(RequestContextFallbackReason::NoSchema)
         );
+    }
+
+    #[test]
+    fn unknown_context_fallback_reason_is_forward_compatible() {
+        let reason: RequestContextFallbackReason =
+            serde_json::from_value(serde_json::json!("future_reason")).unwrap();
+        assert_eq!(reason, RequestContextFallbackReason::Unknown);
     }
 }

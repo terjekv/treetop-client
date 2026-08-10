@@ -7,7 +7,9 @@ use reqwest::Certificate;
 use crate::error::{Result, TreetopError};
 use crate::token::UploadToken;
 
-use super::inner::Client;
+use super::inner::{BaseUrl, Client, CorrelationId, ResponseSizeLimit};
+
+const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// A builder for constructing a [`Client`] with custom configuration.
 ///
@@ -46,6 +48,8 @@ pub struct ClientBuilder {
     danger_accept_invalid_certs: bool,
     root_certificates: Vec<Certificate>,
     custom_client: Option<reqwest::Client>,
+    max_response_bytes: usize,
+    danger_allow_insecure_uploads: bool,
 }
 
 impl ClientBuilder {
@@ -66,6 +70,8 @@ impl ClientBuilder {
             danger_accept_invalid_certs: false,
             root_certificates: Vec::new(),
             custom_client: None,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            danger_allow_insecure_uploads: false,
         }
     }
 
@@ -129,9 +135,29 @@ impl ClientBuilder {
     /// Uses a pre-configured [`reqwest::Client`], bypassing all connection and TLS settings.
     ///
     /// The upload token and correlation ID from this builder are still applied.
-    /// This is an escape hatch for advanced configuration not covered by this builder.
+    /// This is an escape hatch for advanced configuration not covered by this builder. When an
+    /// upload token is configured, ensure the custom client's redirect policy cannot forward the
+    /// `X-Upload-Token` header to an unintended target.
     pub fn with_reqwest_client(mut self, client: reqwest::Client) -> Self {
         self.custom_client = Some(client);
+        self
+    }
+
+    /// Sets the maximum accepted successful response body size. Default: 16 MiB.
+    ///
+    /// This limit protects callers from unbounded response-buffer memory use.
+    /// Setting it to zero causes [`build`](Self::build) to return a configuration error.
+    pub fn max_response_bytes(mut self, max_response_bytes: usize) -> Self {
+        self.max_response_bytes = max_response_bytes;
+        self
+    }
+
+    /// Allows an upload token to be sent to a non-loopback plaintext HTTP server.
+    ///
+    /// This is disabled by default because an upload token sent over HTTP can be intercepted.
+    /// Loopback HTTP URLs remain available for local development and tests.
+    pub fn danger_allow_insecure_uploads(mut self, allow: bool) -> Self {
+        self.danger_allow_insecure_uploads = allow;
         self
     }
 
@@ -140,8 +166,14 @@ impl ClientBuilder {
     /// Returns an error if the underlying reqwest client fails to initialize
     /// (e.g. due to invalid TLS configuration).
     pub fn build(self) -> Result<Client> {
-        let base_url = self.base_url.trim_end_matches('/').to_string();
-        let api_base = format!("{}/api/v1", base_url);
+        let base_url = BaseUrl::parse(&self.base_url)?;
+        let correlation_id = self.correlation_id.map(CorrelationId::parse).transpose()?;
+        let max_response_bytes = ResponseSizeLimit::new(self.max_response_bytes)?;
+
+        if let Some(token) = &self.upload_token {
+            token.validate()?;
+            base_url.validate_upload_transport(self.danger_allow_insecure_uploads)?;
+        }
 
         let http = if let Some(client) = self.custom_client {
             client
@@ -149,7 +181,8 @@ impl ClientBuilder {
             let mut builder = reqwest::Client::builder()
                 .connect_timeout(self.connect_timeout)
                 .timeout(self.request_timeout)
-                .danger_accept_invalid_certs(self.danger_accept_invalid_certs);
+                .danger_accept_invalid_certs(self.danger_accept_invalid_certs)
+                .redirect(reqwest::redirect::Policy::none());
 
             if let Some(idle_timeout) = self.pool_idle_timeout {
                 builder = builder.pool_idle_timeout(idle_timeout);
@@ -166,12 +199,12 @@ impl ClientBuilder {
             builder.build().map_err(TreetopError::Transport)?
         };
 
-        Ok(Client {
+        Ok(Client::new(
             http,
             base_url,
-            api_base,
-            upload_token: self.upload_token,
-            correlation_id: self.correlation_id,
-        })
+            self.upload_token,
+            correlation_id,
+            max_response_bytes,
+        ))
     }
 }

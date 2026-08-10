@@ -110,7 +110,7 @@ Attributes are used in Cedar policy conditions (e.g. `when { resource.ip.isInRan
 use treetop_client::{Action, AttrValue, Request, Resource, User};
 
 let resource = Resource::new("Host", "web-01.example.com")
-    .with_attr("ip", AttrValue::Ip("10.0.0.1".to_string()))
+    .with_attr("ip", AttrValue::ip("10.0.0.1")?)
     .with_attr("name", AttrValue::String("web-01.example.com".to_string()))
     .with_attr("critical", AttrValue::Bool(true))
     .with_attr("priority", AttrValue::Long(1))
@@ -406,7 +406,7 @@ let client = Client::builder("https://treetop.example.com").build()?;
 
 // Per-request correlation -- useful in HTTP handlers
 async fn handle_request(client: &Client, request_id: &str) -> treetop_client::Result<bool> {
-    let traced = client.with_correlation_id(request_id);
+    let traced = client.with_correlation_id(request_id)?;
     // All calls through `traced` send x-correlation-id: <request_id>
     traced.is_allowed(/* ... */).await
 }
@@ -418,7 +418,7 @@ let client = Client::builder("https://treetop.example.com")
 // All calls include x-correlation-id: my-service-instance-1
 
 // Override for a specific request
-let traced = client.with_correlation_id("specific-request-123");
+let traced = client.with_correlation_id("specific-request-123")?;
 // This call sends x-correlation-id: specific-request-123
 traced.health().await?;
 

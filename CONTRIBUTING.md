@@ -17,6 +17,8 @@ cargo fmt --all          # format code
 cargo clippy --all-targets --all-features -- -D warnings  # lint
 cargo test --all-features  # run tests
 cargo doc --no-deps      # build docs
+cargo audit             # scan RustSec advisories
+cargo deny check        # enforce dependency and license policy
 ```
 
 All four checks must pass. CI runs them automatically on every pull request.
@@ -34,6 +36,12 @@ All four checks must pass. CI runs them automatically on every pull request.
 - Integration tests go in `tests/`.
 - Use `wiremock` for HTTP integration tests.
 - Test serde round-trips for any new or modified types.
+- Add property tests for invariants with broad structured input spaces.
+- Add or update a `cargo-fuzz` target for parsers and other untrusted-input boundaries.
+
+The `TREETOP_TEST_IMAGE` environment variable selects the container image used by server tests.
+CI runs the stable compatibility contract against treetop-rest v0.0.4 through v0.0.7 and the full
+suite against v0.0.7.
 
 ### Wire compatibility
 
