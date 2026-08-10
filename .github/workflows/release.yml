@@ -24,6 +24,10 @@ jobs:
         with:
           fetch-depth: 0
       - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: Verify signed annotated tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-release-signature.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
       - name: Verify tag provenance
         run: scripts/check-release-provenance.sh "$GITHUB_SHA" origin/main
       - name: Verify tag and package metadata

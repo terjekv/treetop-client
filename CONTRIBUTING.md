@@ -21,7 +21,7 @@ cargo audit             # scan RustSec advisories
 cargo deny check        # enforce dependency and license policy
 ```
 
-All four checks must pass. CI runs them automatically on every pull request.
+All checks must pass. CI runs them automatically on every pull request.
 
 ### Code style
 
