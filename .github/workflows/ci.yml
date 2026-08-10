@@ -130,7 +130,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
-      - run: cargo fuzz run deserialize -- -runs=2000 -max_len=4096
-      - run: cargo fuzz run urls -- -runs=2000 -max_len=4096
-      - run: cargo fuzz run nested_context -- -runs=2000 -max_len=4096
-      - run: cargo fuzz run response_consistency -- -runs=2000 -max_len=4096
+      - run: cargo fuzz run deserialize --target x86_64-unknown-linux-gnu -- -runs=2000 -max_len=4096
+      - run: cargo fuzz run urls --target x86_64-unknown-linux-gnu -- -runs=2000 -max_len=4096
+      - run: cargo fuzz run nested_context --target x86_64-unknown-linux-gnu -- -runs=2000 -max_len=4096
+      - run: cargo fuzz run response_consistency --target x86_64-unknown-linux-gnu -- -runs=2000 -max_len=4096
