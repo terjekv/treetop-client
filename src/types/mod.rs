@@ -1,4 +1,4 @@
-//! Types for the Treetop REST API, wire-compatible with treetop-core and treetop-rest v0.0.6.
+//! Types for the Treetop REST API, wire-compatible with treetop-core and treetop-rest v0.0.7.
 
 mod action;
 mod policy;
@@ -7,6 +7,7 @@ mod request;
 mod resource;
 mod response;
 mod status;
+mod validation;
 mod version;
 
 pub use action::Action;
@@ -24,4 +25,5 @@ pub use status::{
     Metadata, PoliciesMetadata, RequestContextFallbackReason, RequestContextStatus, RequestLimits,
     StatusResponse,
 };
+pub use validation::{CedarIpAddr, ValidationError};
 pub use version::{Core, PolicyVersion, VersionInfo};

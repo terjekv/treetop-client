@@ -6,14 +6,16 @@ Treetop is a Cedar-based policy evaluation service. This client provides a typed
 
 ## Compatibility
 
-This version targets [treetop-rest v0.0.6](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.6). Types are backward-compatible with v0.0.4+ servers where newer fields use `#[serde(default)]`.
+This version targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.7). CI verifies the stable health, version, policy, and authorization contract against v0.0.4, v0.0.5, v0.0.6, and v0.0.7; v0.0.7 receives the complete endpoint suite. Newer response fields use `#[serde(default)]` for backward compatibility.
 
 ## Features
 
 - **Type-driven design** -- strongly typed request/response types with serde, wire-compatible with the Treetop REST API
 - **Connection pooling** -- built on reqwest with configurable pool sizes and idle timeouts
 - **Secure token handling** -- upload tokens backed by `SecretString` (zeroized on drop, redacted in Debug output)
+- **Validated request boundaries** -- private request fields, Cedar identifier checks, and validated IP/header newtypes
 - **TLS by default** -- uses rustls (pure-Rust TLS, no OpenSSL dependency) with optional custom root certificates
+- **Bounded responses** -- successful response bodies are capped at 16 MiB by default, with a configurable limit
 - **Builder patterns** -- ergonomic builders for client configuration, authorization requests, users, resources, and actions
 - **Batch authorization** -- evaluate multiple authorization requests in a single API call
 - **Correlation IDs** -- clone-with-override pattern for request tracing without shared mutable state
@@ -71,9 +73,15 @@ let client = Client::builder("https://treetop.example.com")
     .request_timeout(Duration::from_secs(30))
     .pool_idle_timeout(Duration::from_secs(90))
     .pool_max_idle_per_host(10)
+    .max_response_bytes(16 * 1024 * 1024)
     .upload_token(UploadToken::new("my-secret-token"))
     .build()?;
 ```
+
+Upload tokens require HTTPS unless the destination is loopback. For an explicitly accepted
+plaintext development server, opt in with `.danger_allow_insecure_uploads(true)`. The default
+HTTP client also rejects redirects so a token cannot be forwarded to a redirect target. A custom
+reqwest client bypasses that redirect policy, so configure its policy deliberately.
 
 For custom TLS configuration:
 
@@ -98,7 +106,7 @@ let client = Client::builder("https://treetop.example.com")
 Correlation IDs are managed via a clone-with-override pattern. The cloned client shares the same connection pool:
 
 ```rust
-let traced = client.with_correlation_id("req-abc-123");
+let traced = client.with_correlation_id("req-abc-123")?;
 traced.authorize(&request).await?;  // sends x-correlation-id header
 
 // Original client is unaffected
@@ -106,6 +114,10 @@ client.authorize(&request).await?;  // no correlation header
 ```
 
 ### Authorization
+
+Request fields are private and exposed through read-only accessors. `authorize()` validates the
+complete batch before transport; `try_new` and `try_with_*` constructors are available when you
+want validation at construction time. `AttrValue::ip()` always validates its IP/CIDR value.
 
 #### Single check
 
@@ -161,7 +173,7 @@ let response = client.authorize_detailed(&batch).await?;
 use treetop_client::{AttrValue, Resource};
 
 let resource = Resource::new("Host", "web-01.example.com")
-    .with_attr("ip", AttrValue::Ip("10.0.0.1".to_string()))
+    .with_attr("ip", AttrValue::ip("10.0.0.1")?)
     .with_attr("environment", AttrValue::String("production".to_string()))
     .with_attr("critical", AttrValue::Bool(true))
     .with_attr("priority", AttrValue::Long(1));
@@ -233,7 +245,7 @@ println!("Context supported: {}", status.request_context.supported);
 
 ### Request context
 
-Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by `treetop-rest v0.0.6`.
+Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by `treetop-rest v0.0.7`.
 
 ```rust
 use std::collections::HashMap;
@@ -242,14 +254,13 @@ use treetop_client::{Action, AttrValue, AuthRequest, AuthorizeRequest, Request, 
 let mut context = HashMap::new();
 context.insert("env".to_string(), AttrValue::String("prod".to_string()));
 
-let batch = AuthorizeRequest {
-    requests: vec![AuthRequest::new(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Photo", "VacationPhoto94.jpg"),
-    ))
-    .with_context(context)],
-};
+let request = AuthRequest::new(Request::new(
+    User::new("alice"),
+    Action::new("view"),
+    Resource::new("Photo", "VacationPhoto94.jpg"),
+))
+    .with_context(context);
+let batch = AuthorizeRequest::from_auth_requests([request]);
 
 let response = client.authorize(&batch).await?;
 ```
@@ -282,3 +293,8 @@ match client.health().await {
 ## License
 
 MIT
+
+## Releasing
+
+Stable tags drive the crates.io and GitHub release workflow. See
+[RELEASING.md](RELEASING.md) for the one-time `v0.0.1` bootstrap and subsequent OIDC releases.

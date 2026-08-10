@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::validation::{EntityId, Namespace, ValidationError};
+
 /// A Cedar action identifier with optional namespace.
 ///
 /// Represents the action being performed in an authorization request
@@ -14,25 +16,55 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Action {
     /// The action identifier (e.g. `"view"`, `"delete"`).
-    pub id: String,
+    id: EntityId,
     /// Optional Cedar namespace path (e.g. `["Admin", "Core"]`).
     #[serde(default)]
-    pub namespace: Vec<String>,
+    namespace: Namespace,
 }
 
 impl Action {
     /// Creates a new action with no namespace.
     pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
-            namespace: Vec::new(),
+            id: EntityId::new(id),
+            namespace: Namespace::default(),
         }
+    }
+
+    /// Creates and validates a new action with no namespace.
+    pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
+        let action = Self::new(id);
+        action.validate()?;
+        Ok(action)
     }
 
     /// Sets the Cedar namespace for this action.
     pub fn with_namespace(mut self, namespace: Vec<String>) -> Self {
-        self.namespace = namespace;
+        self.namespace = Namespace::new(namespace);
         self
+    }
+
+    /// Sets and validates the Cedar namespace for this action.
+    pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
+        let action = self.with_namespace(namespace);
+        action.validate()?;
+        Ok(action)
+    }
+
+    /// Returns the action entity identifier.
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
+    /// Returns the Cedar namespace path.
+    pub fn namespace(&self) -> &[String] {
+        self.namespace.as_slice()
+    }
+
+    /// Validates this action against Cedar and Treetop request invariants.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.id.validate("action.id")?;
+        self.namespace.validate("action.namespace")
     }
 }
 

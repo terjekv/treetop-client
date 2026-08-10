@@ -15,6 +15,7 @@ async fn correlation_id_health_smoke() {
     let s = server().await;
     s.client()
         .with_correlation_id("test-corr-123")
+        .unwrap()
         .health()
         .await
         .unwrap();
@@ -30,6 +31,7 @@ async fn correlation_id_does_not_change_decision() {
     let with = s
         .client()
         .with_correlation_id("corr-id")
+        .unwrap()
         .is_allowed(request)
         .await
         .unwrap();
@@ -46,6 +48,7 @@ async fn without_correlation_id_works() {
     let client = s
         .client()
         .with_correlation_id("temp")
+        .unwrap()
         .without_correlation_id();
     client.health().await.unwrap();
 }

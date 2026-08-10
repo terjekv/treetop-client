@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use std::process::Command;
+use std::sync::{Mutex, Once};
 use std::time::Duration;
 
 use regex::Regex;
@@ -15,10 +16,14 @@ use treetop_client::{
 // Container image
 // ==========================================================================
 
-const IMAGE: &str = "ghcr.io/terjekv/treetop-rest:v0.0.6";
+const DEFAULT_IMAGE: &str = "ghcr.io/terjekv/treetop-rest:v0.0.7";
+const IMAGE_ENV: &str = "TREETOP_TEST_IMAGE";
 const CONTAINER_PREFIX: &str = "treetop-test-";
 const TEST_LABEL_KEY: &str = "treetop-client.test";
 const TEST_LABEL_VALUE: &str = "true";
+
+static CLEANUP_CONTAINER: Mutex<Option<String>> = Mutex::new(None);
+static REGISTER_CLEANUP: Once = Once::new();
 
 // ==========================================================================
 // Test policies
@@ -175,6 +180,7 @@ impl TestServer {
                 .as_millis()
         );
         let label = format!("{TEST_LABEL_KEY}={TEST_LABEL_VALUE}");
+        let image = std::env::var(IMAGE_ENV).unwrap_or_else(|_| DEFAULT_IMAGE.to_string());
 
         // Start container
         let output = Command::new("docker")
@@ -194,8 +200,8 @@ impl TestServer {
                 "-e",
                 "RUST_LOG=warn",
                 "-p",
-                "0:9999",
-                IMAGE,
+                "9999",
+                &image,
             ])
             .output()
             .expect("failed to start docker container -- is Docker running?");
@@ -210,6 +216,7 @@ impl TestServer {
             "docker run failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        register_process_exit_cleanup(&container_id);
 
         // Get assigned port
         let port_output = Command::new("docker")
@@ -223,7 +230,9 @@ impl TestServer {
             .rsplit(':')
             .next()
             .expect("failed to parse port from docker port output");
-        let base_url = format!("http://localhost:{}", port);
+        // Podman may only publish the port on IPv4 while `localhost` resolves to
+        // IPv6 first. Use the explicit loopback address for both runtimes.
+        let base_url = format!("http://127.0.0.1:{}", port);
 
         // Extract upload token from logs (retry since logs may take a moment)
         let token = extract_token(&container_id);
@@ -258,6 +267,33 @@ impl TestServer {
                 ),
             }
         }
+    }
+}
+
+/// Registers removal of this process's exact test container. C `atexit`
+/// callbacks run after the Rust test harness completes, including ordinary
+/// test-failure exits where static Rust values would otherwise never be dropped.
+fn register_process_exit_cleanup(container_id: &str) {
+    if let Ok(mut registered) = CLEANUP_CONTAINER.lock() {
+        *registered = Some(container_id.to_string());
+    }
+    REGISTER_CLEANUP.call_once(|| {
+        // SAFETY: the callback uses the required C ABI, never unwinds, and all
+        // referenced state has static lifetime.
+        let status = unsafe { libc::atexit(cleanup_container_at_exit) };
+        assert_eq!(status, 0, "failed to register test-container cleanup");
+    });
+}
+
+extern "C" fn cleanup_container_at_exit() {
+    let container_id = CLEANUP_CONTAINER
+        .lock()
+        .ok()
+        .and_then(|mut registered| registered.take());
+    if let Some(container_id) = container_id {
+        let _ = Command::new("docker")
+            .args(["rm", "-f", &container_id])
+            .output();
     }
 }
 

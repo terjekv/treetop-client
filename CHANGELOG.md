@@ -5,15 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.1] - 2026-04-04
+## [0.0.1] - Unreleased
 
-Targets [treetop-rest v0.0.6](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.6).
+Targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.7).
 
 ### Added
 
 - Initial release of the Treetop client library.
 - `Client` with builder pattern for configuration (timeouts, TLS, connection pooling, upload tokens).
-- Typed request/response types wire-compatible with the Treetop REST API v0.0.6:
+- Typed request/response types wire-compatible with the Treetop REST API v0.0.7:
   - `User`, `Group`, `Principal` with namespace support.
   - `Action` with namespace support.
   - `Resource` with typed attributes (`AttrValue`: String, Bool, Long, Ip, Set).
@@ -41,8 +41,21 @@ Targets [treetop-rest v0.0.6](https://github.com/terjekv/treetop-rest/releases/t
 - `TreetopError` with variants for transport, API, deserialization, URL, and configuration errors.
 - Correlation ID support via clone-with-override pattern (`with_correlation_id` / `without_correlation_id`).
 - rustls-tls for pure-Rust TLS without OpenSSL dependency.
-- Container-based integration test suite (`--features server-tests`) testing against a real treetop-rest v0.0.6 server.
+- Container-based integration test suite (`--features server-tests`) testing against a real treetop-rest v0.0.7 server.
 - `StatusResponse.request_context` with runtime context support and fallback metadata.
 - `VersionInfo.schema` for the optional loaded-schema version metadata returned by `/api/v1/version`.
 - `SchemaDownload` for the `/api/v1/schema` response shape.
-- `PolicyMatchReason` action variants for `v0.0.6` list-policies match metadata.
+- `PolicyMatchReason` action variants for `v0.0.7` list-policies match metadata.
+- Private request-domain fields with read-only accessors and local validation before transport.
+- Validated Cedar identifier, entity ID, request ID, and IP/CIDR newtypes.
+- Configurable successful-response limit (16 MiB by default) and a 64 KiB error-body limit.
+- Base URL and HTTP header validation, redirect denial on the default client, and protection
+  against sending upload tokens over non-loopback plaintext HTTP.
+- Structural validation for authorization response counts and indices.
+- Forward-compatible unknown variants for policy-match and request-context fallback reasons.
+- RustSec, cargo-deny, and license-policy CI gates.
+- Property tests and cargo-fuzz targets for deserialization, URLs, nested context, and response
+  consistency.
+- A treetop-rest v0.0.4 through v0.0.7 compatibility matrix and automatic test-container cleanup.
+- Tag-driven crates.io and GitHub release automation, including first-release token bootstrap and
+  subsequent OIDC trusted publishing.

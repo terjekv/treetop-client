@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{Result, TreetopError};
+
 use super::policy::PermitPolicy;
 use super::version::PolicyVersion;
 
@@ -102,6 +104,94 @@ pub struct AuthorizeResponse<T> {
     pub successful: usize,
     /// The number of requests that failed evaluation.
     pub failed: usize,
+}
+
+pub(crate) trait DecisionVersion {
+    fn policy_version(&self) -> &PolicyVersion;
+}
+
+impl DecisionVersion for AuthorizeDecisionBrief {
+    fn policy_version(&self) -> &PolicyVersion {
+        &self.version
+    }
+}
+
+impl DecisionVersion for AuthorizeDecisionDetailed {
+    fn policy_version(&self) -> &PolicyVersion {
+        &self.version
+    }
+}
+
+fn validate_response<T>(response: &AuthorizeResponse<T>, expected_results: usize) -> Result<()>
+where
+    T: DecisionVersion,
+{
+    if response.results.len() != expected_results {
+        return Err(TreetopError::InvalidResponse(format!(
+            "authorize returned {} results for {expected_results} requests",
+            response.results.len()
+        )));
+    }
+
+    let actual_successes = response
+        .results
+        .iter()
+        .filter(|result| matches!(&result.result, BatchResult::Success { .. }))
+        .count();
+    let actual_failures = response.results.len() - actual_successes;
+    if response.successful != actual_successes || response.failed != actual_failures {
+        return Err(TreetopError::InvalidResponse(format!(
+            "authorize result counts are inconsistent: declared {} successful and {} failed, observed {actual_successes} successful and {actual_failures} failed",
+            response.successful, response.failed
+        )));
+    }
+
+    let mut seen = vec![false; expected_results];
+    for result in &response.results {
+        let Some(slot) = seen.get_mut(result.index) else {
+            return Err(TreetopError::InvalidResponse(format!(
+                "authorize result index {} is out of range",
+                result.index
+            )));
+        };
+        if *slot {
+            return Err(TreetopError::InvalidResponse(format!(
+                "authorize result index {} is duplicated",
+                result.index
+            )));
+        }
+        *slot = true;
+
+        if let BatchResult::Success { data } = &result.result {
+            if data.policy_version() != &response.version {
+                return Err(TreetopError::InvalidResponse(format!(
+                    "authorize result index {} reports a different policy version than the batch",
+                    result.index
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+impl AuthorizeResponse<AuthorizeDecisionBrief> {
+    /// Validates structural integrity against the number of submitted requests.
+    ///
+    /// This checks result count, declared success/failure counts, result indices,
+    /// and per-result policy versions.
+    pub fn validate(&self, expected_results: usize) -> Result<()> {
+        validate_response(self, expected_results)
+    }
+}
+
+impl AuthorizeResponse<AuthorizeDecisionDetailed> {
+    /// Validates structural integrity against the number of submitted requests.
+    ///
+    /// This checks result count, declared success/failure counts, result indices,
+    /// and per-result policy versions.
+    pub fn validate(&self, expected_results: usize) -> Result<()> {
+        validate_response(self, expected_results)
+    }
 }
 
 impl<T> AuthorizeResponse<T> {

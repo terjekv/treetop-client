@@ -8,6 +8,8 @@ use super::action::Action;
 use super::principal::Principal;
 use super::resource::AttrValue;
 use super::resource::Resource;
+use super::status::RequestLimits;
+use super::validation::{RequestId, ValidationError, validate_attribute_name};
 
 /// A single authorization request: who (principal) wants to do what (action) on which resource.
 ///
@@ -22,11 +24,11 @@ use super::resource::Resource;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Request {
     /// The principal (actor) making the request.
-    pub principal: Principal,
+    principal: Principal,
     /// The action being performed.
-    pub action: Action,
+    action: Action,
     /// The resource being acted upon.
-    pub resource: Resource,
+    resource: Resource,
 }
 
 impl Request {
@@ -41,6 +43,28 @@ impl Request {
             resource,
         }
     }
+
+    /// Returns the principal making the request.
+    pub fn principal(&self) -> &Principal {
+        &self.principal
+    }
+
+    /// Returns the action being performed.
+    pub fn action(&self) -> &Action {
+        &self.action
+    }
+
+    /// Returns the resource being acted upon.
+    pub fn resource(&self) -> &Resource {
+        &self.resource
+    }
+
+    /// Validates all Cedar values in this request.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.principal.validate()?;
+        self.action.validate()?;
+        self.resource.validate()
+    }
 }
 
 /// A single authorization request wrapped with an optional client-provided correlation ID
@@ -54,13 +78,13 @@ impl Request {
 pub struct AuthRequest {
     /// Optional client-provided identifier for correlating this request with its result.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    id: Option<RequestId>,
     /// Optional request-scoped context values available to Cedar policy conditions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<HashMap<String, AttrValue>>,
+    context: Option<HashMap<String, AttrValue>>,
     /// The authorization request (flattened into the same JSON object).
     #[serde(flatten)]
-    pub request: Request,
+    request: Request,
 }
 
 impl AuthRequest {
@@ -76,7 +100,7 @@ impl AuthRequest {
     /// Creates an authorization request with a client-provided correlation ID.
     pub fn with_id(id: impl Into<String>, request: Request) -> Self {
         Self {
-            id: Some(id.into()),
+            id: Some(RequestId::new(id)),
             context: None,
             request,
         }
@@ -88,6 +112,86 @@ impl AuthRequest {
             self.context = Some(context);
         }
         self
+    }
+
+    /// Creates an authorization request with a validated client-provided correlation ID.
+    pub fn try_with_id(id: impl Into<String>, request: Request) -> Result<Self, ValidationError> {
+        let request = Self::with_id(id, request);
+        request.validate()?;
+        Ok(request)
+    }
+
+    /// Sets context after validating all context keys.
+    pub fn try_with_context(
+        self,
+        context: HashMap<String, AttrValue>,
+    ) -> Result<Self, ValidationError> {
+        let request = self.with_context(context);
+        request.validate()?;
+        Ok(request)
+    }
+
+    /// Returns the optional client-provided correlation ID.
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_ref().map(RequestId::as_str)
+    }
+
+    /// Returns the request-scoped context, when present.
+    pub fn context(&self) -> Option<&HashMap<String, AttrValue>> {
+        self.context.as_ref()
+    }
+
+    /// Returns the underlying authorization request.
+    pub fn request(&self) -> &Request {
+        &self.request
+    }
+
+    /// Validates this request without applying server-specific context size limits.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(id) = &self.id {
+            id.validate()?;
+        }
+        if let Some(context) = &self.context {
+            for key in context.keys() {
+                validate_attribute_name(key, "auth_request.context")?;
+            }
+        }
+        self.request.validate()
+    }
+
+    /// Validates request context against limits reported by the target server.
+    pub fn validate_context(&self, limits: RequestLimits) -> Result<(), ValidationError> {
+        let Some(context) = &self.context else {
+            return Ok(());
+        };
+
+        if context.len() > limits.max_context_keys {
+            return Err(ValidationError::ContextTooManyKeys {
+                actual: context.len(),
+                limit: limits.max_context_keys,
+            });
+        }
+
+        let depth = context.values().map(context_value_depth).max().unwrap_or(0);
+        if depth > limits.max_context_depth {
+            return Err(ValidationError::ContextTooDeep {
+                actual: depth,
+                limit: limits.max_context_depth,
+            });
+        }
+
+        let bytes = serde_json::to_vec(context)
+            .map_err(|error| ValidationError::ContextSerialization {
+                message: error.to_string(),
+            })?
+            .len();
+        if bytes > limits.max_context_bytes {
+            return Err(ValidationError::ContextTooLarge {
+                actual: bytes,
+                limit: limits.max_context_bytes,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -114,7 +218,7 @@ impl From<Request> for AuthRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct AuthorizeRequest {
     /// The list of authorization requests in this batch.
-    pub requests: Vec<AuthRequest>,
+    requests: Vec<AuthRequest>,
 }
 
 impl AuthorizeRequest {
@@ -139,6 +243,13 @@ impl AuthorizeRequest {
         }
     }
 
+    /// Creates a batch from pre-built requests, preserving their IDs and context values.
+    pub fn from_auth_requests(requests: impl IntoIterator<Item = AuthRequest>) -> Self {
+        Self {
+            requests: requests.into_iter().collect(),
+        }
+    }
+
     /// Adds a request without a correlation ID to this batch (builder pattern).
     pub fn add_request(mut self, request: Request) -> Self {
         self.requests.push(AuthRequest::new(request));
@@ -150,6 +261,63 @@ impl AuthorizeRequest {
         self.requests.push(AuthRequest::with_id(id, request));
         self
     }
+
+    /// Adds a request after validating its client-provided correlation ID.
+    pub fn try_add_request_with_id(
+        mut self,
+        id: impl Into<String>,
+        request: Request,
+    ) -> Result<Self, ValidationError> {
+        self.requests.push(AuthRequest::try_with_id(id, request)?);
+        Ok(self)
+    }
+
+    /// Returns all requests in this batch.
+    pub fn requests(&self) -> &[AuthRequest] {
+        &self.requests
+    }
+
+    /// Returns the number of requests in this batch.
+    pub fn len(&self) -> usize {
+        self.requests.len()
+    }
+
+    /// Returns `true` when the batch contains no requests.
+    pub fn is_empty(&self) -> bool {
+        self.requests.is_empty()
+    }
+
+    /// Validates every request in the batch.
+    ///
+    /// Empty batches are valid and produce an empty response on compatible servers.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        for request in &self.requests {
+            request.validate()?;
+        }
+        Ok(())
+    }
+
+    /// Validates every request context against limits reported by the target server.
+    pub fn validate_context(&self, limits: RequestLimits) -> Result<(), ValidationError> {
+        for request in &self.requests {
+            request.validate_context(limits)?;
+        }
+        Ok(())
+    }
+}
+
+fn context_value_depth(value: &AttrValue) -> usize {
+    let mut maximum = 0;
+    let mut pending = vec![(value, 1usize)];
+
+    while let Some((value, depth)) = pending.pop() {
+        maximum = maximum.max(depth);
+        if let AttrValue::Set(values) = value {
+            pending.extend(values.iter().map(|value| (value, depth.saturating_add(1))));
+        }
+    }
+
+    maximum
 }
 
 #[cfg(test)]
@@ -212,15 +380,15 @@ mod tests {
             .add_request(sample_request())
             .add_request_with_id("req-2", sample_request());
 
-        assert_eq!(req.requests.len(), 2);
-        assert!(req.requests[0].id.is_none());
-        assert_eq!(req.requests[1].id.as_deref(), Some("req-2"));
+        assert_eq!(req.requests().len(), 2);
+        assert!(req.requests()[0].id().is_none());
+        assert_eq!(req.requests()[1].id(), Some("req-2"));
     }
 
     #[test]
     fn authorize_request_single() {
         let req = AuthorizeRequest::single(sample_request());
-        assert_eq!(req.requests.len(), 1);
+        assert_eq!(req.requests().len(), 1);
     }
 
     #[test]

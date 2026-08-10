@@ -54,7 +54,7 @@ async fn status_reports_schema_defaults() {
     );
     assert!(
         status.policy_configuration.schema.is_some(),
-        "v0.0.6 status should include schema metadata"
+        "v0.0.7 status should include schema metadata"
     );
 }
 

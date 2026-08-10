@@ -35,6 +35,7 @@ pub struct SchemaDownload {
 
 /// Why a policy was selected by the list-policies API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum PolicyMatchReason {
     /// The policy's principal constraint matches the queried user exactly.
     PrincipalEq,
@@ -62,6 +63,9 @@ pub enum PolicyMatchReason {
     ResourceIs,
     /// The policy's resource constraint uses `is ... in` (type + membership).
     ResourceIsIn,
+    /// A match reason introduced by a newer server version.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Match metadata for a listed policy, explaining why it was selected.
@@ -146,6 +150,13 @@ mod tests {
         let json = serde_json::to_value(&reasons).unwrap();
         let deserialized: Vec<PolicyMatchReason> = serde_json::from_value(json).unwrap();
         assert_eq!(reasons, deserialized);
+    }
+
+    #[test]
+    fn unknown_policy_match_reason_is_forward_compatible() {
+        let reason: PolicyMatchReason =
+            serde_json::from_value(serde_json::json!("FutureReason")).unwrap();
+        assert_eq!(reason, PolicyMatchReason::Unknown);
     }
 
     #[test]
