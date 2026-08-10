@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::validation::{EntityId, Namespace, ValidationError};
+
 /// A Cedar group entity with an identifier and optional namespace.
 ///
 /// Groups can be attached to [`User`]s or used directly as a [`Principal`].
@@ -13,25 +15,55 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Group {
     /// The group identifier (e.g. `"admins"`).
-    pub id: String,
+    id: EntityId,
     /// Optional Cedar namespace path (e.g. `["MyApp", "Core"]`).
     #[serde(default)]
-    pub namespace: Vec<String>,
+    namespace: Namespace,
 }
 
 impl Group {
     /// Creates a new group with no namespace.
     pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
-            namespace: Vec::new(),
+            id: EntityId::new(id),
+            namespace: Namespace::default(),
         }
+    }
+
+    /// Creates and validates a new group with no namespace.
+    pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
+        let group = Self::new(id);
+        group.validate()?;
+        Ok(group)
     }
 
     /// Sets the Cedar namespace for this group.
     pub fn with_namespace(mut self, namespace: Vec<String>) -> Self {
-        self.namespace = namespace;
+        self.namespace = Namespace::new(namespace);
         self
+    }
+
+    /// Sets and validates the Cedar namespace for this group.
+    pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
+        let group = self.with_namespace(namespace);
+        group.validate()?;
+        Ok(group)
+    }
+
+    /// Returns the group entity identifier.
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
+    /// Returns the Cedar namespace path.
+    pub fn namespace(&self) -> &[String] {
+        self.namespace.as_slice()
+    }
+
+    /// Validates this group against Cedar and Treetop request invariants.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.id.validate("group.id")?;
+        self.namespace.validate("group.namespace")
     }
 }
 
@@ -44,29 +76,43 @@ impl Group {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct User {
     /// The user identifier (e.g. `"alice"`).
-    pub id: String,
+    id: EntityId,
     /// Optional Cedar namespace path (e.g. `["MyApp"]`).
     #[serde(default)]
-    pub namespace: Vec<String>,
+    namespace: Namespace,
     /// Groups this user belongs to, used for group-based policy matching.
     #[serde(default)]
-    pub groups: Vec<Group>,
+    groups: Vec<Group>,
 }
 
 impl User {
     /// Creates a new user with no namespace or groups.
     pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
-            namespace: Vec::new(),
+            id: EntityId::new(id),
+            namespace: Namespace::default(),
             groups: Vec::new(),
         }
     }
 
+    /// Creates and validates a new user with no namespace or groups.
+    pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
+        let user = Self::new(id);
+        user.validate()?;
+        Ok(user)
+    }
+
     /// Sets the Cedar namespace for this user.
     pub fn with_namespace(mut self, namespace: Vec<String>) -> Self {
-        self.namespace = namespace;
+        self.namespace = Namespace::new(namespace);
         self
+    }
+
+    /// Sets and validates the Cedar namespace for this user.
+    pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
+        let user = self.with_namespace(namespace);
+        user.validate()?;
+        Ok(user)
     }
 
     /// Sets the group memberships using pre-built [`Group`] values.
@@ -81,6 +127,31 @@ impl User {
     pub fn with_group_names(mut self, names: &[&str]) -> Self {
         self.groups = names.iter().map(|n| Group::new(*n)).collect();
         self
+    }
+
+    /// Returns the user entity identifier.
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
+    /// Returns the Cedar namespace path.
+    pub fn namespace(&self) -> &[String] {
+        self.namespace.as_slice()
+    }
+
+    /// Returns the user's group memberships.
+    pub fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+
+    /// Validates this user and all of its groups against request invariants.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.id.validate("user.id")?;
+        self.namespace.validate("user.namespace")?;
+        for group in &self.groups {
+            group.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -107,6 +178,16 @@ impl From<User> for Principal {
 impl From<Group> for Principal {
     fn from(group: Group) -> Self {
         Principal::Group(group)
+    }
+}
+
+impl Principal {
+    /// Validates the concrete user or group principal.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        match self {
+            Self::User(user) => user.validate(),
+            Self::Group(group) => group.validate(),
+        }
     }
 }
 

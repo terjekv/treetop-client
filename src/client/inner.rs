@@ -1,9 +1,12 @@
 //! The Treetop HTTP client.
 
-use reqwest::RequestBuilder;
+use std::sync::Arc;
+
+use reqwest::header::HeaderValue;
+use reqwest::{RequestBuilder, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use url::form_urlencoded;
+use url::{Host, form_urlencoded};
 
 use crate::error::{Result, TreetopError};
 use crate::token::UploadToken;
@@ -16,6 +19,136 @@ use crate::types::{
 use super::builder::ClientBuilder;
 
 const CORRELATION_HEADER: &str = "x-correlation-id";
+const ERROR_BODY_LIMIT: usize = 64 * 1024;
+
+/// A normalized, credential-free HTTP(S) service base URL.
+#[derive(Debug, Clone)]
+pub(super) struct BaseUrl(Url);
+
+impl BaseUrl {
+    pub(super) fn parse(value: &str) -> Result<Self> {
+        let mut url = Url::parse(value.trim())?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(TreetopError::Configuration(
+                "base URL scheme must be http or https".to_string(),
+            ));
+        }
+        if !url.has_host() || url.cannot_be_a_base() {
+            return Err(TreetopError::Configuration(
+                "base URL must include a host".to_string(),
+            ));
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(TreetopError::Configuration(
+                "base URL must not contain credentials".to_string(),
+            ));
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(TreetopError::Configuration(
+                "base URL must not contain a query string or fragment".to_string(),
+            ));
+        }
+
+        let normalized_path = format!("{}/", url.path().trim_end_matches('/'));
+        url.set_path(&normalized_path);
+        Ok(Self(url))
+    }
+
+    pub(super) fn validate_upload_transport(&self, allow_insecure: bool) -> Result<()> {
+        if self.0.scheme() == "https" || allow_insecure || self.is_loopback() {
+            Ok(())
+        } else {
+            Err(TreetopError::Configuration(
+                "refusing to send an upload token over plaintext HTTP; use HTTPS or explicitly enable danger_allow_insecure_uploads".to_string(),
+            ))
+        }
+    }
+
+    fn is_loopback(&self) -> bool {
+        match self.0.host() {
+            Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+            Some(Host::Ipv4(address)) => address.is_loopback(),
+            Some(Host::Ipv6(address)) => address.is_loopback(),
+            None => false,
+        }
+    }
+
+    fn api_base(&self) -> Url {
+        self.0
+            .join("api/v1/")
+            .expect("a validated HTTP base URL must support relative joins")
+    }
+
+    fn root_endpoint(&self, path: &str) -> Url {
+        self.0
+            .join(path)
+            .expect("static root endpoint paths must be valid relative URLs")
+    }
+
+    fn as_str(&self) -> &str {
+        self.0.as_str().trim_end_matches('/')
+    }
+}
+
+/// A pre-validated HTTP correlation header value.
+#[derive(Debug, Clone)]
+pub(super) struct CorrelationId(HeaderValue);
+
+impl CorrelationId {
+    pub(super) fn parse(value: String) -> Result<Self> {
+        if value.is_empty() {
+            return Err(TreetopError::Configuration(
+                "correlation ID must not be empty".to_string(),
+            ));
+        }
+        let value = HeaderValue::try_from(value).map_err(|_| {
+            TreetopError::Configuration(
+                "correlation ID contains invalid HTTP header characters".to_string(),
+            )
+        })?;
+        Ok(Self(value))
+    }
+
+    fn as_header(&self) -> &HeaderValue {
+        &self.0
+    }
+}
+
+/// A non-zero upper bound for successful response bodies.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ResponseSizeLimit(usize);
+
+impl ResponseSizeLimit {
+    pub(super) fn new(value: usize) -> Result<Self> {
+        if value == 0 {
+            Err(TreetopError::Configuration(
+                "maximum response size must be greater than zero".to_string(),
+            ))
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    fn get(self) -> usize {
+        self.0
+    }
+}
+
+struct ClientState {
+    http: reqwest::Client,
+    base_url: BaseUrl,
+    api_base: Url,
+    upload_token: Option<UploadToken>,
+    max_response_bytes: ResponseSizeLimit,
+}
+
+impl ClientState {
+    fn endpoint(&self, path: &str) -> Url {
+        self.api_base
+            .join(path.trim_start_matches('/'))
+            .expect("static API endpoint paths must be valid relative URLs")
+    }
+}
 
 /// An async HTTP client for a Treetop policy authorization server.
 ///
@@ -42,15 +175,33 @@ const CORRELATION_HEADER: &str = "x-correlation-id";
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Clone)]
 pub struct Client {
-    pub(crate) http: reqwest::Client,
-    pub(crate) base_url: String,
-    pub(crate) api_base: String,
-    pub(crate) upload_token: Option<UploadToken>,
-    pub(crate) correlation_id: Option<String>,
+    state: Arc<ClientState>,
+    correlation_id: Option<CorrelationId>,
 }
 
 impl Client {
+    pub(super) fn new(
+        http: reqwest::Client,
+        base_url: BaseUrl,
+        upload_token: Option<UploadToken>,
+        correlation_id: Option<CorrelationId>,
+        max_response_bytes: ResponseSizeLimit,
+    ) -> Self {
+        let api_base = base_url.api_base();
+        Self {
+            state: Arc::new(ClientState {
+                http,
+                base_url,
+                api_base,
+                upload_token,
+                max_response_bytes,
+            }),
+            correlation_id,
+        }
+    }
+
     /// Creates a [`ClientBuilder`] for the given Treetop server base URL.
     ///
     /// The URL should include the scheme and host (e.g. `"https://treetop.example.com"`).
@@ -62,76 +213,112 @@ impl Client {
     ///
     /// The correlation ID is sent as the `x-correlation-id` header on every request
     /// made through the returned client. The original client is unaffected.
-    pub fn with_correlation_id(&self, id: impl Into<String>) -> Client {
-        Client {
-            http: self.http.clone(),
-            base_url: self.base_url.clone(),
-            api_base: self.api_base.clone(),
-            upload_token: self.upload_token.clone(),
-            correlation_id: Some(id.into()),
-        }
+    pub fn with_correlation_id(&self, id: impl Into<String>) -> Result<Client> {
+        Ok(Client {
+            state: Arc::clone(&self.state),
+            correlation_id: Some(CorrelationId::parse(id.into())?),
+        })
     }
 
     /// Returns a new `Client` sharing the same connection pool but without a correlation ID.
     pub fn without_correlation_id(&self) -> Client {
         Client {
-            http: self.http.clone(),
-            base_url: self.base_url.clone(),
-            api_base: self.api_base.clone(),
-            upload_token: self.upload_token.clone(),
+            state: Arc::clone(&self.state),
             correlation_id: None,
         }
     }
 
     fn apply_headers(&self, builder: RequestBuilder) -> RequestBuilder {
         if let Some(cid) = &self.correlation_id {
-            builder.header(CORRELATION_HEADER, cid)
+            builder.header(CORRELATION_HEADER, cid.as_header())
         } else {
             builder
         }
     }
 
+    async fn read_body(&self, mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+        if response
+            .content_length()
+            .is_some_and(|content_length| content_length > limit as u64)
+        {
+            return Err(TreetopError::ResponseTooLarge { limit });
+        }
+
+        let capacity = response
+            .content_length()
+            .and_then(|length| usize::try_from(length).ok())
+            .unwrap_or_default()
+            .min(limit);
+        let mut body = Vec::with_capacity(capacity);
+        while let Some(chunk) = response.chunk().await.map_err(TreetopError::Transport)? {
+            if chunk.len() > limit.saturating_sub(body.len()) {
+                return Err(TreetopError::ResponseTooLarge { limit });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+
+    async fn api_error(&self, response: reqwest::Response) -> TreetopError {
+        let status = response.status();
+        let body = match self.read_body(response, ERROR_BODY_LIMIT).await {
+            Ok(body) => body,
+            Err(TreetopError::ResponseTooLarge { .. }) => {
+                return TreetopError::Api {
+                    status,
+                    message: format!("response error body exceeded {ERROR_BODY_LIMIT} bytes"),
+                };
+            }
+            Err(error) => return error,
+        };
+
+        #[derive(serde::Deserialize)]
+        struct ErrorEnvelope {
+            error: String,
+        }
+
+        let message = serde_json::from_slice::<ErrorEnvelope>(&body)
+            .map(|envelope| envelope.error)
+            .unwrap_or_else(|_| String::from_utf8_lossy(&body).into_owned());
+        TreetopError::Api { status, message }
+    }
+
     async fn handle_response<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
         let status = resp.status();
         if status.is_success() {
-            let body = resp.bytes().await.map_err(TreetopError::Transport)?;
+            let body = self
+                .read_body(resp, self.state.max_response_bytes.get())
+                .await?;
             serde_json::from_slice(&body).map_err(TreetopError::Deserialization)
         } else {
-            let body = resp.text().await.unwrap_or_default();
-            let message = serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(String::from))
-                .unwrap_or(body);
-            Err(TreetopError::Api { status, message })
+            Err(self.api_error(resp).await)
         }
     }
 
     async fn handle_text_response(&self, resp: reqwest::Response) -> Result<String> {
         let status = resp.status();
         if status.is_success() {
-            resp.text().await.map_err(TreetopError::Transport)
+            let body = self
+                .read_body(resp, self.state.max_response_bytes.get())
+                .await?;
+            Ok(String::from_utf8_lossy(&body).into_owned())
         } else {
-            let body = resp.text().await.unwrap_or_default();
-            let message = serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(String::from))
-                .unwrap_or(body);
-            Err(TreetopError::Api { status, message })
+            Err(self.api_error(resp).await)
         }
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let resp = self
-            .apply_headers(self.http.get(format!("{}{}", self.api_base, path)))
+            .apply_headers(self.state.http.get(self.state.endpoint(path)))
             .send()
             .await
             .map_err(TreetopError::Transport)?;
         self.handle_response(resp).await
     }
 
-    async fn get_text(&self, url: &str) -> Result<String> {
+    async fn get_text(&self, url: Url) -> Result<String> {
         let resp = self
-            .apply_headers(self.http.get(url))
+            .apply_headers(self.state.http.get(url))
             .send()
             .await
             .map_err(TreetopError::Transport)?;
@@ -144,11 +331,7 @@ impl Client {
         body: &B,
     ) -> Result<T> {
         let resp = self
-            .apply_headers(
-                self.http
-                    .post(format!("{}{}", self.api_base, path))
-                    .json(body),
-            )
+            .apply_headers(self.state.http.post(self.state.endpoint(path)).json(body))
             .send()
             .await
             .map_err(TreetopError::Transport)?;
@@ -162,7 +345,7 @@ impl Client {
     /// Returns `Ok(())` if the server is reachable and healthy.
     pub async fn health(&self) -> Result<()> {
         let resp = self
-            .apply_headers(self.http.get(format!("{}/health", self.api_base)))
+            .apply_headers(self.state.http.get(self.state.endpoint("health")))
             .send()
             .await
             .map_err(TreetopError::Transport)?;
@@ -170,11 +353,7 @@ impl Client {
         if status.is_success() {
             Ok(())
         } else {
-            let body = resp.text().await.unwrap_or_default();
-            Err(TreetopError::Api {
-                status,
-                message: body,
-            })
+            Err(self.api_error(resp).await)
         }
     }
 
@@ -194,7 +373,11 @@ impl Client {
     ///
     /// Sends `POST /api/v1/authorize?detail=brief`.
     pub async fn authorize(&self, request: &AuthorizeRequest) -> Result<AuthorizeBriefResponse> {
-        self.post_json("/authorize?detail=brief", request).await
+        request.validate()?;
+        let response: AuthorizeBriefResponse =
+            self.post_json("authorize?detail=brief", request).await?;
+        response.validate(request.len())?;
+        Ok(response)
     }
 
     /// Evaluates a batch of authorization requests and returns detailed results
@@ -205,7 +388,11 @@ impl Client {
         &self,
         request: &AuthorizeRequest,
     ) -> Result<AuthorizeDetailedResponse> {
-        self.post_json("/authorize?detail=full", request).await
+        request.validate()?;
+        let response: AuthorizeDetailedResponse =
+            self.post_json("authorize?detail=full", request).await?;
+        response.validate(request.len())?;
+        Ok(response)
     }
 
     /// Convenience method: evaluates a single authorization request and returns
@@ -219,16 +406,12 @@ impl Client {
     pub async fn is_allowed(&self, request: Request) -> Result<bool> {
         let batch = AuthorizeRequest::single(request);
         let resp = self.authorize(&batch).await?;
-        let result = resp.results().first().ok_or_else(|| TreetopError::Api {
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            message: "empty response from authorize endpoint".to_string(),
+        let result = resp.results().first().ok_or_else(|| {
+            TreetopError::InvalidResponse("empty response from authorize endpoint".to_string())
         })?;
         match &result.result {
             BatchResult::Success { data } => Ok(matches!(data.decision, DecisionBrief::Allow)),
-            BatchResult::Failed { message } => Err(TreetopError::Api {
-                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                message: message.clone(),
-            }),
+            BatchResult::Failed { message } => Err(TreetopError::Evaluation(message.clone())),
         }
     }
 
@@ -240,7 +423,7 @@ impl Client {
     /// Downloads the currently loaded policies as raw Cedar DSL text
     /// from `GET /api/v1/policies?format=raw`.
     pub async fn get_policies_raw(&self) -> Result<String> {
-        self.get_text(&format!("{}/policies?format=raw", self.api_base))
+        self.get_text(self.state.endpoint("policies?format=raw"))
             .await
     }
 
@@ -252,7 +435,7 @@ impl Client {
     /// Downloads the currently loaded schema as raw Cedar schema JSON text
     /// from `GET /api/v1/schema?format=raw`.
     pub async fn get_schema_raw(&self) -> Result<String> {
-        self.get_text(&format!("{}/schema?format=raw", self.api_base))
+        self.get_text(self.state.endpoint("schema?format=raw"))
             .await
     }
 
@@ -262,17 +445,18 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated policy metadata on success.
     pub async fn upload_policies_raw(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self
-            .upload_token
-            .as_ref()
-            .ok_or_else(|| TreetopError::Configuration("no upload token configured".to_string()))?;
+        let token =
+            self.state.upload_token.as_ref().ok_or_else(|| {
+                TreetopError::Configuration("no upload token configured".to_string())
+            })?;
 
         let resp = self
             .apply_headers(
-                self.http
-                    .post(format!("{}/policies", self.api_base))
+                self.state
+                    .http
+                    .post(self.state.endpoint("policies"))
                     .header("Content-Type", "text/plain")
-                    .header("X-Upload-Token", token.expose())
+                    .header("X-Upload-Token", token.header_value())
                     .body(content.to_string()),
             )
             .send()
@@ -289,10 +473,10 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated policy metadata on success.
     pub async fn upload_policies_json(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self
-            .upload_token
-            .as_ref()
-            .ok_or_else(|| TreetopError::Configuration("no upload token configured".to_string()))?;
+        let token =
+            self.state.upload_token.as_ref().ok_or_else(|| {
+                TreetopError::Configuration("no upload token configured".to_string())
+            })?;
 
         #[derive(Serialize)]
         struct Upload<'a> {
@@ -301,9 +485,10 @@ impl Client {
 
         let resp = self
             .apply_headers(
-                self.http
-                    .post(format!("{}/policies", self.api_base))
-                    .header("X-Upload-Token", token.expose())
+                self.state
+                    .http
+                    .post(self.state.endpoint("policies"))
+                    .header("X-Upload-Token", token.header_value())
                     .json(&Upload { policies: content }),
             )
             .send()
@@ -318,17 +503,18 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated server metadata on success.
     pub async fn upload_schema_raw(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self
-            .upload_token
-            .as_ref()
-            .ok_or_else(|| TreetopError::Configuration("no upload token configured".to_string()))?;
+        let token =
+            self.state.upload_token.as_ref().ok_or_else(|| {
+                TreetopError::Configuration("no upload token configured".to_string())
+            })?;
 
         let resp = self
             .apply_headers(
-                self.http
-                    .post(format!("{}/schema", self.api_base))
+                self.state
+                    .http
+                    .post(self.state.endpoint("schema"))
                     .header("Content-Type", "text/plain")
-                    .header("X-Upload-Token", token.expose())
+                    .header("X-Upload-Token", token.header_value())
                     .body(content.to_string()),
             )
             .send()
@@ -346,10 +532,10 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated server metadata on success.
     pub async fn upload_schema_json(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self
-            .upload_token
-            .as_ref()
-            .ok_or_else(|| TreetopError::Configuration("no upload token configured".to_string()))?;
+        let token =
+            self.state.upload_token.as_ref().ok_or_else(|| {
+                TreetopError::Configuration("no upload token configured".to_string())
+            })?;
 
         #[derive(Serialize)]
         struct Upload<'a> {
@@ -358,9 +544,10 @@ impl Client {
 
         let resp = self
             .apply_headers(
-                self.http
-                    .post(format!("{}/schema", self.api_base))
-                    .header("X-Upload-Token", token.expose())
+                self.state
+                    .http
+                    .post(self.state.endpoint("schema"))
+                    .header("X-Upload-Token", token.header_value())
                     .json(&Upload { schema: content }),
             )
             .send()
@@ -380,7 +567,7 @@ impl Client {
     ) -> Result<UserPolicies> {
         let url = self.build_user_policies_url(user, groups, namespaces, false);
         let resp = self
-            .apply_headers(self.http.get(&url))
+            .apply_headers(self.state.http.get(url))
             .send()
             .await
             .map_err(TreetopError::Transport)?;
@@ -398,15 +585,15 @@ impl Client {
         namespaces: &[String],
     ) -> Result<String> {
         let url = self.build_user_policies_url(user, groups, namespaces, true);
-        self.get_text(&url).await
+        self.get_text(url).await
     }
 
     /// Fetches Prometheus metrics from the server's `GET /metrics` endpoint.
     ///
     /// Returns the raw text in Prometheus exposition format.
     pub async fn metrics(&self) -> Result<String> {
-        let metrics_url = format!("{}/metrics", self.base_url);
-        self.get_text(&metrics_url).await
+        self.get_text(self.state.base_url.root_endpoint("metrics"))
+            .await
     }
 
     fn build_user_policies_url(
@@ -415,28 +602,25 @@ impl Client {
         groups: &[String],
         namespaces: &[String],
         raw: bool,
-    ) -> String {
+    ) -> Url {
         let encoded_user: String = form_urlencoded::byte_serialize(user.as_bytes()).collect();
-        let mut url = format!("{}/policies/{}", self.api_base, encoded_user);
+        let mut url = self
+            .state
+            .endpoint("policies/")
+            .join(&encoded_user)
+            .expect("a form-encoded path segment must be a valid relative URL");
 
-        let mut params = Vec::new();
+        let mut query = url.query_pairs_mut();
         for ns in namespaces {
-            let encoded: String = form_urlencoded::byte_serialize(ns.as_bytes()).collect();
-            params.push(format!("namespaces[]={}", encoded));
+            query.append_pair("namespaces[]", ns);
         }
         for group in groups {
-            let encoded: String = form_urlencoded::byte_serialize(group.as_bytes()).collect();
-            params.push(format!("groups[]={}", encoded));
+            query.append_pair("groups[]", group);
         }
         if raw {
-            params.push("format=raw".to_string());
+            query.append_pair("format", "raw");
         }
-
-        if !params.is_empty() {
-            url.push('?');
-            url.push_str(&params.join("&"));
-        }
-
+        drop(query);
         url
     }
 }
@@ -444,8 +628,11 @@ impl Client {
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
-            .field("base_url", &self.base_url)
-            .field("upload_token", &self.upload_token.as_ref().map(|_| "[SET]"))
+            .field("base_url", &self.state.base_url.as_str())
+            .field(
+                "upload_token",
+                &self.state.upload_token.as_ref().map(|_| "[SET]"),
+            )
             .field("correlation_id", &self.correlation_id)
             .finish()
     }

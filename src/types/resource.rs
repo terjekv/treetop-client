@@ -4,6 +4,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::validation::{
+    CedarIpAddr, CedarTypeName, EntityId, ValidationError, validate_attribute_name,
+};
+
 /// A typed attribute value that can be attached to a [`Resource`].
 ///
 /// Serializes using adjacently tagged representation:
@@ -20,9 +24,16 @@ pub enum AttrValue {
     /// A 64-bit integer attribute value.
     Long(i64),
     /// An IP address or CIDR block (e.g. `"10.0.0.1"` or `"10.0.0.0/8"`).
-    Ip(String),
+    Ip(CedarIpAddr),
     /// A set of attribute values (typically homogeneous, e.g. a set of strings).
     Set(Vec<AttrValue>),
+}
+
+impl AttrValue {
+    /// Creates a validated Cedar IP extension value.
+    pub fn ip(value: impl Into<String>) -> Result<Self, ValidationError> {
+        CedarIpAddr::new(value).map(Self::Ip)
+    }
 }
 
 /// A Cedar resource entity -- the target of an authorization request.
@@ -39,22 +50,32 @@ pub enum AttrValue {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Resource {
     /// The resource type name (e.g. `"Host"`, `"Document"`).
-    pub kind: String,
+    kind: CedarTypeName,
     /// The resource identifier (e.g. `"web-01"`, `"doc-42"`).
-    pub id: String,
+    id: EntityId,
     /// Optional key-value attributes for policy evaluation conditions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub attrs: BTreeMap<String, AttrValue>,
+    attrs: BTreeMap<String, AttrValue>,
 }
 
 impl Resource {
     /// Creates a new resource with no attributes.
     pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
         Self {
-            kind: kind.into(),
-            id: id.into(),
+            kind: CedarTypeName::new(kind),
+            id: EntityId::new(id),
             attrs: BTreeMap::new(),
         }
+    }
+
+    /// Creates and validates a new resource with no attributes.
+    pub fn try_new(
+        kind: impl Into<String>,
+        id: impl Into<String>,
+    ) -> Result<Self, ValidationError> {
+        let resource = Self::new(kind, id);
+        resource.validate()?;
+        Ok(resource)
     }
 
     /// Adds a typed attribute to this resource (builder pattern).
@@ -63,6 +84,47 @@ impl Resource {
     pub fn with_attr(mut self, key: impl Into<String>, value: AttrValue) -> Self {
         self.attrs.insert(key.into(), value);
         self
+    }
+
+    /// Adds an attribute after validating its name.
+    pub fn try_with_attr(
+        self,
+        key: impl Into<String>,
+        value: AttrValue,
+    ) -> Result<Self, ValidationError> {
+        let resource = self.with_attr(key, value);
+        resource.validate()?;
+        Ok(resource)
+    }
+
+    /// Returns the qualified Cedar resource type.
+    pub fn kind(&self) -> &str {
+        self.kind.as_str()
+    }
+
+    /// Returns the resource entity identifier.
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
+    /// Returns the resource attributes.
+    pub fn attrs(&self) -> &BTreeMap<String, AttrValue> {
+        &self.attrs
+    }
+
+    /// Returns an attribute by name.
+    pub fn attr(&self, key: &str) -> Option<&AttrValue> {
+        self.attrs.get(key)
+    }
+
+    /// Validates this resource against Cedar and Treetop request invariants.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.kind.validate("resource.kind")?;
+        self.id.validate("resource.id")?;
+        for key in self.attrs.keys() {
+            validate_attribute_name(key, "resource.attrs")?;
+        }
+        Ok(())
     }
 }
 
@@ -86,7 +148,7 @@ mod tests {
             .with_attr("owner", AttrValue::String("alice".to_string()))
             .with_attr("public", AttrValue::Bool(false))
             .with_attr("priority", AttrValue::Long(5))
-            .with_attr("ip", AttrValue::Ip("10.0.0.1".to_string()));
+            .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap());
         let json = serde_json::to_value(&resource).unwrap();
         assert!(json["attrs"].is_object());
         assert_eq!(json["attrs"]["owner"]["type"], "String");
@@ -101,8 +163,8 @@ mod tests {
     #[case::long_positive(AttrValue::Long(42))]
     #[case::long_negative(AttrValue::Long(-1))]
     #[case::long_zero(AttrValue::Long(0))]
-    #[case::ip_v4(AttrValue::Ip("192.168.1.1".to_string()))]
-    #[case::ip_cidr(AttrValue::Ip("10.0.0.0/8".to_string()))]
+    #[case::ip_v4(AttrValue::ip("192.168.1.1").unwrap())]
+    #[case::ip_cidr(AttrValue::ip("10.0.0.0/8").unwrap())]
     #[case::set(AttrValue::Set(vec![AttrValue::String("a".to_string()), AttrValue::String("b".to_string())]))]
     #[case::empty_set(AttrValue::Set(vec![]))]
     #[case::nested_set(AttrValue::Set(vec![AttrValue::Set(vec![AttrValue::Long(1)])]))]
@@ -115,7 +177,7 @@ mod tests {
     #[test]
     fn resource_roundtrip() {
         let resource =
-            Resource::new("Host", "web-01").with_attr("ip", AttrValue::Ip("10.0.0.1".to_string()));
+            Resource::new("Host", "web-01").with_attr("ip", AttrValue::ip("10.0.0.1").unwrap());
         let json = serde_json::to_value(&resource).unwrap();
         let deserialized: Resource = serde_json::from_value(json).unwrap();
         assert_eq!(resource, deserialized);

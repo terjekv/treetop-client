@@ -48,7 +48,13 @@ HTTP status codes:
 - **403** -- upload not allowed, invalid or missing upload token
 - **500** -- internal server error (lock poisoning, evaluation failure)
 
-Mapped to `TreetopError::Api { status, message }` in the client.
+Mapped to `TreetopError::Api { status, message }` in the client. A failed item inside a successful
+batch response is exposed as `TreetopError::Evaluation` by `is_allowed()`. Local request failures,
+oversized responses, and inconsistent successful responses use `Validation`, `ResponseTooLarge`,
+and `InvalidResponse`, respectively.
+
+The default client buffers at most 16 MiB for a successful body and 64 KiB for an error body.
+Configure the successful-body limit with `ClientBuilder::max_response_bytes()`.
 
 ## Type reference
 

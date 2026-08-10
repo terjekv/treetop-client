@@ -114,19 +114,15 @@ async fn upload_context_policy_and_authorize_with_context() {
     let mut context = std::collections::HashMap::new();
     context.insert("env".to_string(), AttrValue::String("prod".to_string()));
 
-    let batch = AuthorizeRequest {
-        requests: vec![
-            AuthRequest::with_id(
-                "ctx-1",
-                Request::new(
-                    User::new("alice"),
-                    Action::new("view"),
-                    Resource::new("Photo", "VacationPhoto94.jpg"),
-                ),
-            )
-            .with_context(context),
-        ],
-    };
+    let batch = AuthorizeRequest::from_auth_requests([AuthRequest::with_id(
+        "ctx-1",
+        Request::new(
+            User::new("alice"),
+            Action::new("view"),
+            Resource::new("Photo", "VacationPhoto94.jpg"),
+        ),
+    )
+    .with_context(context)]);
 
     let resp = s.client().authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 1);
