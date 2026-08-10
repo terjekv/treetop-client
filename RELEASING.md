@@ -1,8 +1,9 @@
 # Releasing treetop-client
 
 Releases are driven by stable `vMAJOR.MINOR.PATCH` tags. The release workflow verifies that the
-tag points to a commit on `main`, matches the package version and changelog, passes the complete CI
-suite, publishes the crate, and creates the GitHub release.
+tag is annotated and has a GitHub-verified signature, points to a commit on `main`, matches the
+package version and changelog, passes the complete CI suite, publishes the crate, and creates the
+GitHub release.
 
 ## First release: v0.0.1
 
@@ -26,10 +27,11 @@ release with one of these approaches:
 ## Subsequent releases
 
 1. Update `version` in `Cargo.toml` and refresh `Cargo.lock`.
-2. Add the matching `CHANGELOG.md` section.
+2. Move the accumulated `CHANGELOG.md` entries from `[Unreleased]` into a dated section matching
+   the new version, and update the comparison links.
 3. Run `scripts/check-release.sh vX.Y.Z` from a clean checkout and complete the local checks in
    `CONTRIBUTING.md`.
-4. Merge to `main`, then create and push the signed tag:
+4. Merge signed commits to `main`, then create and push the signed annotated tag:
 
    ```bash
    git tag -s vX.Y.Z -m "Release vX.Y.Z"
@@ -38,4 +40,5 @@ release with one of these approaches:
 
 With the trusted publisher configured, the workflow uses a short-lived OIDC credential and needs
 no long-lived crates.io secret. Published crates.io versions are immutable, so never reuse a tag or
-package version.
+package version. Treat a pushed release tag as immutable as well; if a release fails, fix the
+problem in a new commit and publish a new patch version instead of moving the tag.
