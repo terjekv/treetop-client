@@ -11,9 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add configurable 16 MiB request-body limits and automatic per-request context-limit enforcement.
 - Add `MetadataSource`, a validated crate-owned representation of the server's source endpoint.
+- Add `ReadOnly` and `CanUpload` client capability states. Upload methods are available only on a
+  `Client<CanUpload>` produced by adding a validated upload token to `ClientBuilder`.
+- Add `Client::authorization()` with typed brief and detailed call states, including per-call
+  correlation IDs.
+- Add `Client::user_policies()` with fluent group and namespace filters and typed structured/raw
+  response states.
 
 ### Changed
 
+- **Breaking:** `User::new`, `Group::new`, `Action::new`, `Resource::new`, and `UploadToken::new`
+  now return `Result` and reject invalid values immediately. Their fluent namespace, group-name,
+  attribute, request-ID, and context setters are now fallible for the same reason. Replace delayed
+  `validate()` calls with `?` at construction and setter call sites.
+- **Breaking:** `ClientBuilder::upload_token` now transitions the builder from `ReadOnly` to
+  `CanUpload`; code that stores an upload-capable client with an explicit type must use
+  `Client<CanUpload>`. Calling uploads on a client built without a token no longer produces a
+  runtime configuration error because those methods are absent at compile time.
+- **Breaking:** `AuthRequest::with_id` is now a fluent setter used as
+  `AuthRequest::new(request).with_id(id)?`. `AuthorizeRequest::from_auth_requests` and
+  `add_request_with_id` now return `Result` and reject duplicate request IDs during construction.
+- Validate resource attribute keys, request-context keys, and batch request-ID uniqueness during
+  deserialization so serde cannot bypass public constructor invariants.
 - Require GitHub-verified signed annotated release tags before publishing.
 - **Breaking:** Change `Metadata.source` from `Option<String>` to `Option<MetadataSource>` to match
   the v0.0.7 `{ "url": "..." }` wire shape. Use `source.as_str()` to migrate string access.

@@ -14,9 +14,9 @@
 //!
 //! let allowed = client
 //!     .is_allowed(Request::new(
-//!         User::new("alice"),
-//!         Action::new("view"),
-//!         Resource::new("Document", "doc-42"),
+//!         User::new("alice").unwrap(),
+//!         Action::new("view").unwrap(),
+//!         Resource::new("Document", "doc-42").unwrap(),
 //!     ))
 //!     .await?;
 //! # Ok(())
@@ -45,7 +45,10 @@ pub mod error;
 pub mod token;
 pub mod types;
 
-pub use client::{Client, ClientBuilder};
+pub use client::{
+    Authorization, CanUpload, Client, ClientBuilder, DetailedAuthorization, RawUserPoliciesRequest,
+    ReadOnly, UserPoliciesRequest,
+};
 pub use error::{Result, TreetopError};
 pub use token::UploadToken;
 pub use types::{

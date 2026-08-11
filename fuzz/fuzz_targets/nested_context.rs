@@ -47,11 +47,12 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let request = AuthRequest::new(Request::new(
-        User::new("fuzzer"),
-        Action::new("check"),
-        Resource::new("Document", "target"),
+        User::new("fuzzer").unwrap(),
+        Action::new("check").unwrap(),
+        Resource::new("Document", "target").unwrap(),
     ))
-    .with_context(context);
+    .with_context(context)
+    .unwrap();
     let limits = RequestLimits {
         max_context_bytes: usize::from(take_byte(data, &mut cursor)) * 128,
         max_context_depth: usize::from(take_byte(data, &mut cursor) % 40),

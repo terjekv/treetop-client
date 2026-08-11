@@ -10,9 +10,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn sample_request() -> Request {
     Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Document", "doc-1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Document", "doc-1").unwrap(),
     )
 }
 
@@ -47,28 +47,23 @@ fn request_domain_accessors_preserve_private_values() {
 
 #[test]
 fn invalid_cedar_names_are_rejected() {
-    let action = Action::new("view").with_namespace(vec!["bad-name".to_string()]);
     assert!(matches!(
-        action.validate(),
+        Action::new("view")
+            .unwrap()
+            .with_namespace(vec!["bad-name".to_string()]),
         Err(ValidationError::InvalidCedarIdentifier { .. })
     ));
 
-    let resource = Resource::new("__cedar::Document", "doc-1");
     assert!(matches!(
-        resource.validate(),
+        Resource::new("__cedar::Document", "doc-1"),
         Err(ValidationError::ReservedCedarIdentifier { .. })
     ));
 }
 
 #[test]
 fn unsafe_entity_ids_are_rejected() {
-    let request = Request::new(
-        User::new("ali\"ce"),
-        Action::new("view"),
-        Resource::new("Document", "doc-1"),
-    );
     assert!(matches!(
-        request.validate(),
+        User::new("ali\"ce"),
         Err(ValidationError::InvalidEntityId { .. })
     ));
 }
@@ -86,6 +81,46 @@ fn deserialization_cannot_bypass_newtype_validation() {
         "value": "999.999.999.999"
     }));
     assert!(ip.is_err());
+
+    let resource = serde_json::from_value::<Resource>(json!({
+        "kind": "Document",
+        "id": "doc-1",
+        "attrs": {"bad\nkey": {"type": "Bool", "value": true}}
+    }));
+    assert!(resource.is_err());
+
+    let auth_request = serde_json::from_value::<AuthRequest>(json!({
+        "context": {"bad\nkey": {"type": "Bool", "value": true}},
+        "principal": {"User": {"id": "alice", "namespace": [], "groups": []}},
+        "action": {"id": "view", "namespace": []},
+        "resource": {"kind": "Document", "id": "doc-1"}
+    }));
+    assert!(auth_request.is_err());
+}
+
+#[test]
+fn collection_invariants_are_rejected_during_construction() {
+    assert!(
+        Resource::new("Document", "doc-1")
+            .unwrap()
+            .with_attr("bad\nkey", AttrValue::Bool(true))
+            .is_err()
+    );
+
+    let mut context = HashMap::new();
+    context.insert("bad\nkey".to_string(), AttrValue::Bool(true));
+    assert!(
+        AuthRequest::new(sample_request())
+            .with_context(context)
+            .is_err()
+    );
+
+    let first = AuthRequest::new(sample_request()).with_id("same").unwrap();
+    let second = AuthRequest::new(sample_request()).with_id("same").unwrap();
+    assert!(AuthorizeRequest::from_auth_requests([first.clone(), second.clone()]).is_err());
+
+    let wire = json!({"requests": [first, second]});
+    assert!(serde_json::from_value::<AuthorizeRequest>(wire).is_err());
 }
 
 #[test]
@@ -96,7 +131,9 @@ fn context_validation_uses_reported_server_limits() {
         AttrValue::String("prod".to_string()),
     );
     context.insert("mfa".to_string(), AttrValue::Bool(true));
-    let request = AuthRequest::new(sample_request()).with_context(context);
+    let request = AuthRequest::new(sample_request())
+        .with_context(context)
+        .unwrap();
 
     let error = request
         .validate_context(RequestLimits {
@@ -115,7 +152,9 @@ fn context_validation_checks_size_and_depth() {
         "nested".to_string(),
         AttrValue::Set(vec![AttrValue::Set(vec![AttrValue::Long(1)])]),
     );
-    let request = AuthRequest::new(sample_request()).with_context(context);
+    let request = AuthRequest::new(sample_request())
+        .with_context(context)
+        .unwrap();
 
     let size_error = request
         .validate_context(RequestLimits {
@@ -170,12 +209,7 @@ fn builder_validates_header_values_and_response_limit() {
             .build()
             .is_err()
     );
-    assert!(
-        Client::builder("http://localhost")
-            .upload_token(UploadToken::new("bad\nheader"))
-            .build()
-            .is_err()
-    );
+    assert!(UploadToken::new("bad\nheader").is_err());
     assert!(
         Client::builder("http://localhost")
             .max_response_bytes(0)
@@ -194,13 +228,13 @@ fn builder_validates_header_values_and_response_limit() {
 fn upload_tokens_require_secure_non_loopback_transport() {
     assert!(
         Client::builder("http://example.com")
-            .upload_token(UploadToken::new("secret"))
+            .upload_token(UploadToken::new("secret").unwrap())
             .build()
             .is_err()
     );
     assert!(
         Client::builder("http://example.com")
-            .upload_token(UploadToken::new("secret"))
+            .upload_token(UploadToken::new("secret").unwrap())
             .danger_allow_insecure_uploads(true)
             .build()
             .is_ok()
@@ -302,7 +336,7 @@ async fn authorization_requests_are_bounded_before_transport() {
 #[tokio::test]
 async fn upload_bodies_are_bounded_before_transport() {
     let client = Client::builder("http://localhost")
-        .upload_token(UploadToken::new("secret"))
+        .upload_token(UploadToken::new("secret").unwrap())
         .max_request_bytes(4)
         .build()
         .unwrap();
@@ -332,9 +366,10 @@ async fn request_context_limits_are_enforced_before_transport() {
         "environment".to_string(),
         AttrValue::String("prod".to_string()),
     );
-    let request = AuthorizeRequest::from_auth_requests([
-        AuthRequest::new(sample_request()).with_context(context)
-    ]);
+    let auth_request = AuthRequest::new(sample_request())
+        .with_context(context)
+        .unwrap();
+    let request = AuthorizeRequest::from_auth_requests([auth_request]).unwrap();
 
     assert!(matches!(
         client.authorize(&request).await,
@@ -379,7 +414,7 @@ async fn api_errors_redact_reflected_upload_tokens() {
     let server = MockServer::start().await;
     let token = "do-not-leak-this-token";
     let client = Client::builder(server.uri())
-        .upload_token(UploadToken::new(token))
+        .upload_token(UploadToken::new(token).unwrap())
         .build()
         .unwrap();
     Mock::given(method("POST"))
@@ -449,7 +484,9 @@ async fn authorization_response_ids_must_match_requests() {
         .respond_with(ResponseTemplate::new(200).set_body_json(response))
         .mount(&server)
         .await;
-    let batch = AuthorizeRequest::new().add_request_with_id("expected", sample_request());
+    let batch = AuthorizeRequest::new()
+        .add_request_with_id("expected", sample_request())
+        .unwrap();
 
     assert!(matches!(
         client.authorize(&batch).await,

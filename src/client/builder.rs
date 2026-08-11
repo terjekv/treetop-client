@@ -8,7 +8,10 @@ use crate::error::{Result, TreetopError};
 use crate::token::UploadToken;
 use crate::types::RequestLimits;
 
-use super::inner::{BaseUrl, Client, CorrelationId, RequestSizeLimit, ResponseSizeLimit};
+use super::capability::{CanUpload, ReadOnly};
+use super::inner::{
+    BaseUrl, Client, ClientState, CorrelationId, RequestSizeLimit, ResponseSizeLimit,
+};
 
 const DEFAULT_MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -38,17 +41,17 @@ const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// let client = Client::builder("https://treetop.example.com")
 ///     .connect_timeout(Duration::from_secs(10))
-///     .upload_token(UploadToken::new("my-token"))
+///     .upload_token(UploadToken::new("my-token").unwrap())
 ///     .build()
 ///     .unwrap();
 /// ```
-pub struct ClientBuilder {
+pub struct ClientBuilder<Capability = ReadOnly> {
     base_url: String,
     connect_timeout: Duration,
     request_timeout: Duration,
     pool_idle_timeout: Option<Duration>,
     pool_max_idle_per_host: Option<usize>,
-    upload_token: Option<UploadToken>,
+    capability: Capability,
     correlation_id: Option<String>,
     danger_accept_invalid_certs: bool,
     root_certificates: Vec<Certificate>,
@@ -59,7 +62,7 @@ pub struct ClientBuilder {
     danger_allow_insecure_uploads: bool,
 }
 
-impl ClientBuilder {
+impl ClientBuilder<ReadOnly> {
     /// Creates a new builder for the given Treetop server base URL.
     ///
     /// The URL should include the scheme and host (e.g. `"https://treetop.example.com"`).
@@ -72,7 +75,7 @@ impl ClientBuilder {
             request_timeout: Duration::from_secs(30),
             pool_idle_timeout: Some(Duration::from_secs(90)),
             pool_max_idle_per_host: None,
-            upload_token: None,
+            capability: ReadOnly,
             correlation_id: None,
             danger_accept_invalid_certs: false,
             root_certificates: Vec::new(),
@@ -84,6 +87,48 @@ impl ClientBuilder {
         }
     }
 
+    /// Adds validated upload authority and transitions this builder to [`CanUpload`].
+    ///
+    /// A client built after this transition exposes policy and schema upload methods. Clients
+    /// built without this transition do not expose those methods.
+    pub fn upload_token(self, token: UploadToken) -> ClientBuilder<CanUpload> {
+        let Self {
+            base_url,
+            connect_timeout,
+            request_timeout,
+            pool_idle_timeout,
+            pool_max_idle_per_host,
+            capability: _,
+            correlation_id,
+            danger_accept_invalid_certs,
+            root_certificates,
+            custom_client,
+            max_request_bytes,
+            max_response_bytes,
+            request_limits,
+            danger_allow_insecure_uploads,
+        } = self;
+
+        ClientBuilder {
+            base_url,
+            connect_timeout,
+            request_timeout,
+            pool_idle_timeout,
+            pool_max_idle_per_host,
+            capability: CanUpload::new(token),
+            correlation_id,
+            danger_accept_invalid_certs,
+            root_certificates,
+            custom_client,
+            max_request_bytes,
+            max_response_bytes,
+            request_limits,
+            danger_allow_insecure_uploads,
+        }
+    }
+}
+
+impl<Capability> ClientBuilder<Capability> {
     /// Sets the TCP connection timeout. Default: 5 seconds.
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = timeout;
@@ -105,14 +150,6 @@ impl ClientBuilder {
     /// Sets the maximum number of idle connections per host in the pool.
     pub fn pool_max_idle_per_host(mut self, n: usize) -> Self {
         self.pool_max_idle_per_host = Some(n);
-        self
-    }
-
-    /// Sets the upload token used to authenticate policy uploads.
-    ///
-    /// Required for [`Client::upload_policies_raw`] and [`Client::upload_policies_json`].
-    pub fn upload_token(mut self, token: UploadToken) -> Self {
-        self.upload_token = Some(token);
         self
     }
 
@@ -179,29 +216,18 @@ impl ClientBuilder {
         self
     }
 
-    /// Allows an upload token to be sent to a non-loopback plaintext HTTP server.
-    ///
-    /// This is disabled by default because an upload token sent over HTTP can be intercepted.
-    /// Loopback HTTP URLs remain available for local development and tests.
-    pub fn danger_allow_insecure_uploads(mut self, allow: bool) -> Self {
-        self.danger_allow_insecure_uploads = allow;
-        self
-    }
-
-    /// Builds the [`Client`] with the configured settings.
-    ///
-    /// Returns an error if the underlying reqwest client fails to initialize
-    /// (e.g. due to invalid TLS configuration).
-    pub fn build(self) -> Result<Client> {
+    fn build_state(
+        self,
+        validate_upload_transport: bool,
+        upload_redactor: Option<CanUpload>,
+    ) -> Result<(ClientState, Option<CorrelationId>, Capability)> {
         let base_url = BaseUrl::parse(&self.base_url)?;
+        if validate_upload_transport {
+            base_url.validate_upload_transport(self.danger_allow_insecure_uploads)?;
+        }
         let correlation_id = self.correlation_id.map(CorrelationId::parse).transpose()?;
         let max_request_bytes = RequestSizeLimit::new(self.max_request_bytes)?;
         let max_response_bytes = ResponseSizeLimit::new(self.max_response_bytes)?;
-
-        if let Some(token) = &self.upload_token {
-            token.validate()?;
-            base_url.validate_upload_transport(self.danger_allow_insecure_uploads)?;
-        }
 
         let http = if let Some(client) = self.custom_client {
             client
@@ -227,14 +253,48 @@ impl ClientBuilder {
             builder.build().map_err(TreetopError::Transport)?
         };
 
-        Ok(Client::new(
-            http,
-            base_url,
-            self.upload_token,
+        Ok((
+            ClientState::new(
+                http,
+                base_url,
+                max_request_bytes,
+                max_response_bytes,
+                self.request_limits,
+                upload_redactor,
+            ),
             correlation_id,
-            max_request_bytes,
-            max_response_bytes,
-            self.request_limits,
+            self.capability,
         ))
+    }
+}
+
+impl ClientBuilder<ReadOnly> {
+    /// Builds a read-only [`Client`].
+    ///
+    /// Returns an error when the URL, headers, response limit, or HTTP configuration is invalid.
+    pub fn build(self) -> Result<Client<ReadOnly>> {
+        let (state, correlation_id, capability) = self.build_state(false, None)?;
+        Ok(Client::new(state, correlation_id, capability))
+    }
+}
+
+impl ClientBuilder<CanUpload> {
+    /// Allows the upload token to be sent to a non-loopback plaintext HTTP server.
+    ///
+    /// This is disabled by default because an upload token sent over HTTP can be intercepted.
+    /// Loopback HTTP URLs remain available for local development and tests.
+    pub fn danger_allow_insecure_uploads(mut self, allow: bool) -> Self {
+        self.danger_allow_insecure_uploads = allow;
+        self
+    }
+
+    /// Builds a [`CanUpload`] client.
+    ///
+    /// Returns an error when the URL, headers, response limit, HTTP configuration, or upload
+    /// transport is invalid.
+    pub fn build(self) -> Result<Client<CanUpload>> {
+        let upload_redactor = self.capability.clone();
+        let (state, correlation_id, capability) = self.build_state(true, Some(upload_redactor))?;
+        Ok(Client::new(state, correlation_id, capability))
     }
 }

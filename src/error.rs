@@ -41,7 +41,7 @@ pub enum TreetopError {
     #[error("Invalid URL: {0}")]
     InvalidUrl(#[from] url::ParseError),
 
-    /// A client configuration error, such as a missing upload token.
+    /// A client configuration error, such as an invalid URL, header, limit, or TLS setup.
     #[error("Client configuration error: {0}")]
     Configuration(String),
 
