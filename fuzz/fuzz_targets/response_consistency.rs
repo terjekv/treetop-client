@@ -1,7 +1,5 @@
 #![no_main]
 
-use std::collections::HashSet;
-
 use libfuzzer_sys::fuzz_target;
 use treetop_client::{
     AuthorizeBriefResponse, AuthorizeDecisionBrief, BatchResult, DecisionBrief, IndexedResult,
@@ -28,10 +26,16 @@ fuzz_target!(|data: &[u8]| {
         let index = usize::from(take_byte(data, &mut cursor) % 40);
         let success = take_byte(data, &mut cursor) % 2 == 0;
         let matching_version = take_byte(data, &mut cursor) % 2 == 0;
+        let allow = take_byte(data, &mut cursor) % 2 == 0;
+        let has_policy = take_byte(data, &mut cursor) % 2 == 0;
         let result = if success {
             BatchResult::Success {
                 data: AuthorizeDecisionBrief {
-                    decision: DecisionBrief::Allow,
+                    decision: if allow {
+                        DecisionBrief::Allow
+                    } else {
+                        DecisionBrief::Deny
+                    },
                     version: if matching_version {
                         version.clone()
                     } else {
@@ -40,7 +44,11 @@ fuzz_target!(|data: &[u8]| {
                             loaded_at: version.loaded_at.clone(),
                         }
                     },
-                    policy_id: "policy".to_string(),
+                    policy_id: if has_policy {
+                        "policy".to_string()
+                    } else {
+                        String::new()
+                    },
                 },
             }
         } else {
@@ -69,11 +77,11 @@ fuzz_target!(|data: &[u8]| {
         .iter()
         .filter(|result| matches!(result.result, BatchResult::Success { .. }))
         .count();
-    let unique_indices = response
+    let indices_are_ordered = response
         .results()
         .iter()
-        .map(|result| result.index)
-        .collect::<HashSet<_>>();
+        .enumerate()
+        .all(|(position, result)| result.index == position);
     let versions_match = response
         .results()
         .iter()
@@ -81,12 +89,22 @@ fuzz_target!(|data: &[u8]| {
             BatchResult::Success { data } => data.version == *response.version(),
             BatchResult::Failed { .. } => true,
         });
+    let decisions_are_consistent = response
+        .results()
+        .iter()
+        .all(|result| match &result.result {
+            BatchResult::Success { data } => match data.decision {
+                DecisionBrief::Allow => !data.policy_id.is_empty(),
+                DecisionBrief::Deny => data.policy_id.is_empty(),
+            },
+            BatchResult::Failed { .. } => true,
+        });
     let should_validate = response.total() == expected
         && response.successes() == actual_successful
         && response.failures() == response.total() - actual_successful
-        && unique_indices.len() == expected
-        && unique_indices.iter().all(|index| *index < expected)
-        && versions_match;
+        && indices_are_ordered
+        && versions_match
+        && decisions_are_consistent;
 
     assert_eq!(response.validate(expected).is_ok(), should_validate);
 });

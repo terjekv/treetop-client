@@ -49,6 +49,11 @@ impl UploadToken {
         header.set_sensitive(true);
         header
     }
+
+    /// Redacts every occurrence of this token from a potentially reflected message.
+    pub(crate) fn redact_from(&self, message: String) -> String {
+        message.replace(self.expose(), "[REDACTED]")
+    }
 }
 
 impl std::fmt::Debug for UploadToken {
@@ -85,5 +90,13 @@ mod tests {
     fn request_header_is_marked_sensitive() {
         let token = UploadToken::try_new("my-token").unwrap();
         assert!(token.header_value().is_sensitive());
+    }
+
+    #[test]
+    fn reflected_token_is_redacted() {
+        let token = UploadToken::try_new("super-secret-value").unwrap();
+        let message = token.redact_from("rejected super-secret-value".to_string());
+
+        assert_eq!(message, "rejected [REDACTED]");
     }
 }

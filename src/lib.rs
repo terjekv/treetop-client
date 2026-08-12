@@ -32,9 +32,13 @@
 //! # Security
 //!
 //! Upload tokens are stored using [`secrecy::SecretString`], which zeroizes memory on drop
-//! and is redacted in `Debug` output. TLS uses rustls by default (pure Rust, no OpenSSL).
-//! Request-domain fields are private and validated before transport, redirects are disabled on
-//! the default HTTP client, and successful response bodies have a configurable size limit.
+//! and is redacted in `Debug` output. TLS uses rustls by default without an OpenSSL/system-TLS
+//! dependency. Request-domain fields are private and validated before transport, redirects are
+//! disabled on the default HTTP client, and request and successful-response bodies have
+//! configurable size limits.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod client;
 pub mod error;
@@ -47,8 +51,9 @@ pub use token::UploadToken;
 pub use types::{
     Action, AttrValue, AuthRequest, AuthorizeBriefResponse, AuthorizeDecisionBrief,
     AuthorizeDecisionDetailed, AuthorizeDetailedResponse, AuthorizeRequest, AuthorizeResponse,
-    BatchResult, CedarIpAddr, Core, DecisionBrief, Group, IndexedResult, Metadata, PermitPolicy,
-    PoliciesDownload, PoliciesMetadata, PolicyMatch, PolicyMatchReason, PolicyVersion, Principal,
-    Request, RequestContextFallbackReason, RequestContextStatus, RequestLimits, Resource,
-    SchemaDownload, StatusResponse, User, UserPolicies, ValidationError, VersionInfo,
+    BatchResult, CedarIpAddr, Core, DecisionBrief, Group, IndexedResult, Metadata, MetadataSource,
+    PermitPolicy, PoliciesDownload, PoliciesMetadata, PolicyMatch, PolicyMatchReason,
+    PolicyVersion, Principal, Request, RequestContextFallbackReason, RequestContextStatus,
+    RequestLimits, Resource, SchemaDownload, StatusResponse, User, UserPolicies, ValidationError,
+    VersionInfo,
 };

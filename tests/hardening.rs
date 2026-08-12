@@ -182,6 +182,12 @@ fn builder_validates_header_values_and_response_limit() {
             .build()
             .is_err()
     );
+    assert!(
+        Client::builder("http://localhost")
+            .max_request_bytes(0)
+            .build()
+            .is_err()
+    );
 }
 
 #[test]
@@ -244,6 +250,152 @@ async fn successful_response_bodies_are_bounded() {
 }
 
 #[tokio::test]
+async fn health_response_bodies_are_drained_and_bounded() {
+    let server = MockServer::start().await;
+    let client = Client::builder(server.uri())
+        .max_response_bytes(4)
+        .build()
+        .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/api/v1/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("12345"))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        client.health().await,
+        Err(TreetopError::ResponseTooLarge { limit: 4 })
+    ));
+}
+
+#[tokio::test]
+async fn successful_text_responses_require_utf8() {
+    let server = MockServer::start().await;
+    let client = Client::builder(server.uri()).build().unwrap();
+    Mock::given(method("GET"))
+        .and(path("/metrics"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xff]))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        client.metrics().await,
+        Err(TreetopError::InvalidTextResponse)
+    ));
+}
+
+#[tokio::test]
+async fn authorization_requests_are_bounded_before_transport() {
+    let client = Client::builder("http://localhost")
+        .max_request_bytes(16)
+        .build()
+        .unwrap();
+
+    assert!(matches!(
+        client
+            .authorize(&AuthorizeRequest::single(sample_request()))
+            .await,
+        Err(TreetopError::RequestTooLarge { limit: 16 })
+    ));
+}
+
+#[tokio::test]
+async fn upload_bodies_are_bounded_before_transport() {
+    let client = Client::builder("http://localhost")
+        .upload_token(UploadToken::new("secret"))
+        .max_request_bytes(4)
+        .build()
+        .unwrap();
+
+    assert!(matches!(
+        client.upload_policies_raw("12345").await,
+        Err(TreetopError::RequestTooLarge { limit: 4 })
+    ));
+    assert!(matches!(
+        client.upload_schema_json("{}").await,
+        Err(TreetopError::RequestTooLarge { limit: 4 })
+    ));
+}
+
+#[tokio::test]
+async fn request_context_limits_are_enforced_before_transport() {
+    let client = Client::builder("http://localhost")
+        .request_limits(RequestLimits {
+            max_context_bytes: usize::MAX,
+            max_context_depth: usize::MAX,
+            max_context_keys: 0,
+        })
+        .build()
+        .unwrap();
+    let mut context = HashMap::new();
+    context.insert(
+        "environment".to_string(),
+        AttrValue::String("prod".to_string()),
+    );
+    let request = AuthorizeRequest::from_auth_requests([
+        AuthRequest::new(sample_request()).with_context(context)
+    ]);
+
+    assert!(matches!(
+        client.authorize(&request).await,
+        Err(TreetopError::Validation(
+            ValidationError::ContextTooManyKeys { .. }
+        ))
+    ));
+}
+
+#[tokio::test]
+async fn user_policy_filters_are_validated_before_transport() {
+    let client = Client::builder("http://localhost").build().unwrap();
+
+    for user in ["", ".", ".."] {
+        assert!(matches!(
+            client.get_user_policies(user, &[], &[]).await,
+            Err(TreetopError::Validation(
+                ValidationError::InvalidPathSegment { .. }
+            ))
+        ));
+    }
+    assert!(matches!(
+        client
+            .get_user_policies("alice", &["bad\"group".to_string()], &[])
+            .await,
+        Err(TreetopError::Validation(
+            ValidationError::InvalidEntityId { .. }
+        ))
+    ));
+    assert!(matches!(
+        client
+            .get_user_policies("alice", &[], &["bad-name".to_string()])
+            .await,
+        Err(TreetopError::Validation(
+            ValidationError::InvalidCedarIdentifier { .. }
+        ))
+    ));
+}
+
+#[tokio::test]
+async fn api_errors_redact_reflected_upload_tokens() {
+    let server = MockServer::start().await;
+    let token = "do-not-leak-this-token";
+    let client = Client::builder(server.uri())
+        .upload_token(UploadToken::new(token))
+        .build()
+        .unwrap();
+    Mock::given(method("POST"))
+        .and(path("/api/v1/policies"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": format!("invalid upload token: {token}")
+        })))
+        .mount(&server)
+        .await;
+
+    let error = client.upload_policies_raw("permit();").await.unwrap_err();
+    assert!(!error.to_string().contains(token));
+    assert!(error.to_string().contains("[REDACTED]"));
+}
+
+#[tokio::test]
 async fn default_client_does_not_follow_redirects() {
     let server = MockServer::start().await;
     let client = Client::builder(server.uri()).build().unwrap();
@@ -282,5 +434,25 @@ async fn inconsistent_authorization_responses_are_rejected() {
     assert!(matches!(
         client.authorize(&batch).await,
         Err(TreetopError::InvalidResponse(_))
+    ));
+}
+
+#[tokio::test]
+async fn authorization_response_ids_must_match_requests() {
+    let server = MockServer::start().await;
+    let client = Client::builder(server.uri()).build().unwrap();
+    let mut response = brief_response();
+    response["results"][0]["id"] = json!("different");
+    Mock::given(method("POST"))
+        .and(path("/api/v1/authorize"))
+        .and(query_param("detail", "brief"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response))
+        .mount(&server)
+        .await;
+    let batch = AuthorizeRequest::new().add_request_with_id("expected", sample_request());
+
+    assert!(matches!(
+        client.authorize(&batch).await,
+        Err(TreetopError::InvalidResponse(message)) if message.contains("correlation ID")
     ));
 }

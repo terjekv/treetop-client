@@ -16,8 +16,8 @@ This version targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-re
 - **Connection pooling** -- built on reqwest with configurable pool sizes and idle timeouts
 - **Secure token handling** -- upload tokens backed by `SecretString` (zeroized on drop, redacted in Debug output)
 - **Validated request boundaries** -- private request fields, Cedar identifier checks, and validated IP/header newtypes
-- **TLS by default** -- uses rustls (pure-Rust TLS, no OpenSSL dependency) with optional custom root certificates
-- **Bounded responses** -- successful response bodies are capped at 16 MiB by default, with a configurable limit
+- **TLS by default** -- uses rustls without an OpenSSL/system-TLS dependency, with optional custom root certificates
+- **Bounded I/O** -- request and successful-response bodies are capped at 16 MiB by default, with configurable limits
 - **Builder patterns** -- ergonomic builders for client configuration, authorization requests, users, resources, and actions
 - **Batch authorization** -- evaluate multiple authorization requests in a single API call
 - **Correlation IDs** -- clone-with-override pattern for request tracing without shared mutable state
@@ -68,14 +68,16 @@ async fn main() -> treetop_client::Result<()> {
 
 ```rust
 use std::time::Duration;
-use treetop_client::{Client, UploadToken};
+use treetop_client::{Client, RequestLimits, UploadToken};
 
 let client = Client::builder("https://treetop.example.com")
     .connect_timeout(Duration::from_secs(5))
     .request_timeout(Duration::from_secs(30))
     .pool_idle_timeout(Duration::from_secs(90))
     .pool_max_idle_per_host(10)
+    .max_request_bytes(16 * 1024 * 1024)
     .max_response_bytes(16 * 1024 * 1024)
+    .request_limits(RequestLimits::default())
     .upload_token(UploadToken::new("my-secret-token"))
     .build()?;
 ```
@@ -119,7 +121,9 @@ client.authorize(&request).await?;  // no correlation header
 
 Request fields are private and exposed through read-only accessors. `authorize()` validates the
 complete batch before transport; `try_new` and `try_with_*` constructors are available when you
-want validation at construction time. `AttrValue::ip()` always validates its IP/CIDR value.
+want validation at construction time. Duplicate request IDs are rejected, and response IDs,
+indices, ordering, counts, policy versions, and decisions are checked against the submitted batch.
+`AttrValue::ip()` always validates its IP/CIDR value.
 
 #### Single check
 
@@ -243,11 +247,17 @@ println!("Server: {}, Cedar: {}", version.version, version.core.cedar);
 let status = client.status().await?;
 println!("Policies loaded: {}", status.policy_configuration.policies.entries);
 println!("Context supported: {}", status.request_context.supported);
+if let Some(source) = &status.policy_configuration.policies.source {
+    println!("Policy source: {}", source.as_str());
+}
 ```
 
 ### Request context
 
-Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by `treetop-rest v0.0.7`.
+Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by
+`treetop-rest v0.0.7`. The client automatically enforces `RequestLimits::default()` before
+transport; configure limits reported by a differently configured server with
+`ClientBuilder::request_limits()`.
 
 ```rust
 use std::collections::HashMap;

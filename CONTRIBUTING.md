@@ -6,22 +6,31 @@ Thank you for considering contributing to treetop-client.
 
 1. Fork the repository and clone your fork.
 2. Make sure you have Rust 1.85+ installed (`rustup update stable`).
-3. Run `cargo test` to verify everything works.
+3. Run the local verification baseline below.
 
 ## Development workflow
 
 ### Before submitting a PR
 
 ```bash
-cargo fmt --all          # format code
-cargo clippy --all-targets --all-features -- -D warnings  # lint
-cargo test --all-features  # run tests
-cargo doc --no-deps      # build docs
-cargo audit             # scan RustSec advisories
-cargo deny check        # enforce dependency and license policy
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets
+cargo test --doc
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 ```
 
-All checks must pass. CI runs them automatically on every pull request.
+Run `cargo test --all-features` after transport, endpoint, or server-facing type changes; it
+requires Docker. After dependency or policy changes, also run:
+
+```bash
+cargo audit --deny warnings
+cargo deny check advisories bans licenses sources
+```
+
+Run relevant fuzz targets after changing an untrusted-input boundary, and use
+`cargo package --locked` when release or package contents change. All applicable checks must pass.
+If an external service or tool is unavailable, state exactly which check remains unverified.
 
 ### Code style
 

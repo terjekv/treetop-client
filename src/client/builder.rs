@@ -6,9 +6,11 @@ use reqwest::Certificate;
 
 use crate::error::{Result, TreetopError};
 use crate::token::UploadToken;
+use crate::types::RequestLimits;
 
-use super::inner::{BaseUrl, Client, CorrelationId, ResponseSizeLimit};
+use super::inner::{BaseUrl, Client, CorrelationId, RequestSizeLimit, ResponseSizeLimit};
 
+const DEFAULT_MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// A builder for constructing a [`Client`] with custom configuration.
@@ -23,6 +25,9 @@ const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 /// | Connect timeout | 5 seconds |
 /// | Request timeout | 30 seconds |
 /// | Pool idle timeout | 90 seconds |
+/// | Maximum request body | 16 MiB |
+/// | Maximum successful response body | 16 MiB |
+/// | Request-context limits | [`RequestLimits::default`] |
 /// | Accept invalid certs | `false` |
 ///
 /// # Example
@@ -48,7 +53,9 @@ pub struct ClientBuilder {
     danger_accept_invalid_certs: bool,
     root_certificates: Vec<Certificate>,
     custom_client: Option<reqwest::Client>,
+    max_request_bytes: usize,
     max_response_bytes: usize,
+    request_limits: RequestLimits,
     danger_allow_insecure_uploads: bool,
 }
 
@@ -70,7 +77,9 @@ impl ClientBuilder {
             danger_accept_invalid_certs: false,
             root_certificates: Vec::new(),
             custom_client: None,
+            max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            request_limits: RequestLimits::default(),
             danger_allow_insecure_uploads: false,
         }
     }
@@ -152,6 +161,24 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the maximum serialized request body size. Default: 16 MiB.
+    ///
+    /// The limit applies to authorization requests and raw or JSON-wrapped uploads before any
+    /// network request is sent. Setting it to zero causes [`build`](Self::build) to fail.
+    pub fn max_request_bytes(mut self, max_request_bytes: usize) -> Self {
+        self.max_request_bytes = max_request_bytes;
+        self
+    }
+
+    /// Sets the limits automatically enforced for each authorization request's context.
+    ///
+    /// The defaults match current Treetop server defaults. Callers targeting a server with
+    /// different reported limits should pass those values here.
+    pub fn request_limits(mut self, request_limits: RequestLimits) -> Self {
+        self.request_limits = request_limits;
+        self
+    }
+
     /// Allows an upload token to be sent to a non-loopback plaintext HTTP server.
     ///
     /// This is disabled by default because an upload token sent over HTTP can be intercepted.
@@ -168,6 +195,7 @@ impl ClientBuilder {
     pub fn build(self) -> Result<Client> {
         let base_url = BaseUrl::parse(&self.base_url)?;
         let correlation_id = self.correlation_id.map(CorrelationId::parse).transpose()?;
+        let max_request_bytes = RequestSizeLimit::new(self.max_request_bytes)?;
         let max_response_bytes = ResponseSizeLimit::new(self.max_response_bytes)?;
 
         if let Some(token) = &self.upload_token {
@@ -204,7 +232,9 @@ impl ClientBuilder {
             base_url,
             self.upload_token,
             correlation_id,
+            max_request_bytes,
             max_response_bytes,
+            self.request_limits,
         ))
     }
 }
