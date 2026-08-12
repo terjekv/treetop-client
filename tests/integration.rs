@@ -4,8 +4,8 @@ use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use treetop_client::{
-    Action, AttrValue, AuthorizeRequest, BatchResult, Client, DecisionBrief, Group, Request,
-    Resource, TreetopError, UploadToken, User,
+    Action, AttrValue, AuthorizeRequest, BatchResult, CanUpload, Client, DecisionBrief, Group,
+    Request, Resource, TreetopError, UploadToken, User,
 };
 
 // ==========================================================================
@@ -18,10 +18,10 @@ async fn setup() -> (MockServer, Client) {
     (server, client)
 }
 
-async fn setup_with_token(token: &str) -> (MockServer, Client) {
+async fn setup_with_token(token: &str) -> (MockServer, Client<CanUpload>) {
     let server = MockServer::start().await;
     let client = Client::builder(server.uri())
-        .upload_token(UploadToken::new(token))
+        .upload_token(UploadToken::new(token).unwrap())
         .build()
         .unwrap();
     (server, client)
@@ -194,11 +194,11 @@ async fn authorize_sends_correct_payload() {
         .await;
 
     let batch = AuthorizeRequest::single(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Doc", "1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
     ));
-    let resp = client.authorize(&batch).await.unwrap();
+    let resp = client.authorization(&batch).send().await.unwrap();
     assert_eq!(resp.successes(), 1);
 }
 
@@ -214,11 +214,14 @@ async fn authorize_with_attributes() {
         .await;
 
     let batch = AuthorizeRequest::single(Request::new(
-        User::new("alice"),
-        Action::new("create"),
+        User::new("alice").unwrap(),
+        Action::new("create").unwrap(),
         Resource::new("Host", "web-01")
+            .unwrap()
             .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap())
-            .with_attr("critical", AttrValue::Bool(true)),
+            .unwrap()
+            .with_attr("critical", AttrValue::Bool(true))
+            .unwrap(),
     ));
     let resp = client.authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 1);
@@ -264,15 +267,16 @@ async fn authorize_with_context_sends_context() {
 
     let mut context = std::collections::HashMap::new();
     context.insert("env".to_string(), AttrValue::String("prod".to_string()));
-    let batch = AuthorizeRequest::from_auth_requests([treetop_client::AuthRequest::with_id(
-        "ctx-1",
-        Request::new(
-            User::new("alice"),
-            Action::new("view"),
-            Resource::new("Doc", "1"),
-        ),
-    )
-    .with_context(context)]);
+    let request = treetop_client::AuthRequest::new(Request::new(
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
+    ))
+    .with_id("ctx-1")
+    .unwrap()
+    .with_context(context)
+    .unwrap();
+    let batch = AuthorizeRequest::from_auth_requests([request]).unwrap();
 
     let resp = client.authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 1);
@@ -308,11 +312,16 @@ async fn authorize_detailed_sends_detail_full() {
         .await;
 
     let batch = AuthorizeRequest::single(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Doc", "1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
     ));
-    let resp = client.authorize_detailed(&batch).await.unwrap();
+    let resp = client
+        .authorization(&batch)
+        .detailed()
+        .send()
+        .await
+        .unwrap();
     let result = &resp.results()[0];
     match &result.result {
         BatchResult::Success { data } => {
@@ -322,6 +331,30 @@ async fn authorize_detailed_sends_detail_full() {
         }
         _ => panic!("expected success"),
     }
+}
+
+#[tokio::test]
+async fn authorization_call_overrides_correlation_id() {
+    let (server, client) = setup().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/authorize"))
+        .and(header("x-correlation-id", "call-id"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(brief_response("Allow", "p1")))
+        .mount(&server)
+        .await;
+
+    let batch = AuthorizeRequest::single(Request::new(
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
+    ));
+    client
+        .authorization(&batch)
+        .correlation_id("call-id")
+        .unwrap()
+        .send()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -345,9 +378,12 @@ async fn authorize_with_group_principal() {
         .await;
 
     let batch = AuthorizeRequest::single(Request::new(
-        Group::new("admins").with_namespace(vec!["DNS".to_string()]),
-        Action::new("manage"),
-        Resource::new("Zone", "example.com"),
+        Group::new("admins")
+            .unwrap()
+            .with_namespace(vec!["DNS".to_string()])
+            .unwrap(),
+        Action::new("manage").unwrap(),
+        Resource::new("Zone", "example.com").unwrap(),
     ));
     let resp = client.authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 1);
@@ -375,9 +411,9 @@ async fn is_allowed_returns_expected_decision(
 
     let allowed = client
         .is_allowed(Request::new(
-            User::new("alice"),
-            Action::new("view"),
-            Resource::new("Doc", "1"),
+            User::new("alice").unwrap(),
+            Action::new("view").unwrap(),
+            Resource::new("Doc", "1").unwrap(),
         ))
         .await
         .unwrap();
@@ -404,9 +440,9 @@ async fn is_allowed_returns_error_on_failed_result() {
 
     let err = client
         .is_allowed(Request::new(
-            User::new("bad"),
-            Action::new("view"),
-            Resource::new("Doc", "1"),
+            User::new("bad").unwrap(),
+            Action::new("view").unwrap(),
+            Resource::new("Doc", "1").unwrap(),
         ))
         .await
         .unwrap_err();
@@ -553,32 +589,18 @@ async fn get_schema_raw() {
 }
 
 // ==========================================================================
-// Upload -- parameterized: both raw and json require a token
+// Upload capability
 // ==========================================================================
 
-#[rstest]
-#[case::raw("raw")]
-#[case::json("json")]
-#[tokio::test]
-async fn upload_without_token_returns_configuration_error(#[case] variant: &str) {
-    let (_server, client) = setup().await;
-    let err = match variant {
-        "raw" => client
-            .upload_policies_raw("permit(...);")
-            .await
-            .unwrap_err(),
-        "json" => client
-            .upload_policies_json("permit(...);")
-            .await
-            .unwrap_err(),
-        _ => unreachable!(),
-    };
-    match err {
-        TreetopError::Configuration(msg) => {
-            assert!(msg.contains("no upload token"));
-        }
-        _ => panic!("expected Configuration error, got: {err:?}"),
-    }
+#[test]
+fn upload_token_transitions_client_capability() {
+    fn accepts_upload_client(_: &Client<CanUpload>) {}
+
+    let client = Client::builder("http://localhost")
+        .upload_token(UploadToken::new("secret").unwrap())
+        .build()
+        .unwrap();
+    accepts_upload_client(&client);
 }
 
 #[tokio::test]
@@ -673,7 +695,13 @@ async fn get_user_policies_with_filters() {
         .await;
 
     let policies = client
-        .get_user_policies("alice", &["admins".into()], &["DNS".into()])
+        .user_policies("alice")
+        .unwrap()
+        .group("admins")
+        .unwrap()
+        .namespace("DNS")
+        .unwrap()
+        .send()
         .await
         .unwrap();
     assert_eq!(policies.user, "alice");
@@ -693,9 +721,49 @@ async fn user_policies_with_empty_groups_and_namespaces() {
         .mount(&server)
         .await;
 
-    let policies = client.get_user_policies("alice", &[], &[]).await.unwrap();
+    let policies = client.user_policies("alice").unwrap().send().await.unwrap();
     assert_eq!(policies.user, "alice");
     assert!(policies.policies.is_empty());
+}
+
+#[tokio::test]
+async fn user_policies_raw_transition_returns_text() {
+    let (server, client) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/policies/alice"))
+        .and(query_param("format", "raw"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("permit(principal);"))
+        .mount(&server)
+        .await;
+
+    let policies = client
+        .user_policies("alice")
+        .unwrap()
+        .raw()
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(policies, "permit(principal);");
+}
+
+#[test]
+fn user_policy_query_validates_path_and_filters_immediately() {
+    let client = Client::builder("http://localhost").build().unwrap();
+    assert!(client.user_policies("..").is_err());
+    assert!(
+        client
+            .user_policies("alice")
+            .unwrap()
+            .group("bad\"group")
+            .is_err()
+    );
+    assert!(
+        client
+            .user_policies("alice")
+            .unwrap()
+            .namespace("bad-name")
+            .is_err()
+    );
 }
 
 // --- URL encoding edge cases (parameterized) ---
@@ -730,6 +798,7 @@ async fn user_policies_encodes_user_in_path(
 
 #[rstest]
 #[case::qualified_namespace("alice", "namespaces[]", "App::Documents", &[], &["App::Documents".to_string()])]
+#[case::unicode_group("alice", "groups[]", "r\u{00e9}seau", &["r\u{00e9}seau".to_string()], &[])]
 #[case::ampersand_group("bob", "groups[]", "r&d", &["r&d".to_string()], &[])]
 #[tokio::test]
 async fn user_policies_encodes_query_params(
@@ -881,12 +950,22 @@ async fn batch_with_mixed_success_and_failure() {
     let batch = AuthorizeRequest::new()
         .add_request_with_id(
             "good",
-            Request::new(User::new("a"), Action::new("v"), Resource::new("D", "1")),
+            Request::new(
+                User::new("a").unwrap(),
+                Action::new("v").unwrap(),
+                Resource::new("D", "1").unwrap(),
+            ),
         )
+        .unwrap()
         .add_request_with_id(
             "bad",
-            Request::new(User::new("b"), Action::new("v"), Resource::new("D", "2")),
-        );
+            Request::new(
+                User::new("b").unwrap(),
+                Action::new("v").unwrap(),
+                Resource::new("D", "2").unwrap(),
+            ),
+        )
+        .unwrap();
     let resp = client.authorize(&batch).await.unwrap();
 
     assert_eq!(resp.successes(), 1);
@@ -917,9 +996,9 @@ async fn into_results_consumes_response() {
         .await;
 
     let batch = AuthorizeRequest::single(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Doc", "1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
     ));
     let resp = client.authorize(&batch).await.unwrap();
     let results = resp.into_results();
@@ -993,7 +1072,7 @@ async fn builder_with_reqwest_client_escape_hatch() {
 #[test]
 fn client_debug_does_not_leak_token() {
     let client = Client::builder("http://localhost:9999")
-        .upload_token(UploadToken::new("super-secret"))
+        .upload_token(UploadToken::new("super-secret").unwrap())
         .build()
         .unwrap();
     let debug = format!("{:?}", client);
@@ -1181,9 +1260,21 @@ fn authorize_request_default_is_empty() {
 #[test]
 fn authorize_request_from_requests_iterator() {
     let requests = vec![
-        Request::new(User::new("a"), Action::new("v"), Resource::new("D", "1")),
-        Request::new(User::new("b"), Action::new("v"), Resource::new("D", "2")),
-        Request::new(User::new("c"), Action::new("v"), Resource::new("D", "3")),
+        Request::new(
+            User::new("a").unwrap(),
+            Action::new("v").unwrap(),
+            Resource::new("D", "1").unwrap(),
+        ),
+        Request::new(
+            User::new("b").unwrap(),
+            Action::new("v").unwrap(),
+            Resource::new("D", "2").unwrap(),
+        ),
+        Request::new(
+            User::new("c").unwrap(),
+            Action::new("v").unwrap(),
+            Resource::new("D", "3").unwrap(),
+        ),
     ];
     let batch = AuthorizeRequest::from_requests(requests);
     assert_eq!(batch.requests().len(), 3);
@@ -1228,9 +1319,9 @@ async fn detailed_response_with_no_annotation_id() {
         .await;
 
     let batch = AuthorizeRequest::single(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Doc", "1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
     ));
     let resp = client.authorize_detailed(&batch).await.unwrap();
     match &resp.results()[0].result {
@@ -1295,9 +1386,9 @@ async fn deserialization_error_on_malformed_json_body() {
 #[test]
 fn auth_request_without_id_omits_id_field() {
     let auth = treetop_client::AuthRequest::new(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Doc", "1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Doc", "1").unwrap(),
     ));
     let json = serde_json::to_value(&auth).unwrap();
     assert!(
@@ -1315,8 +1406,11 @@ fn auth_request_without_id_omits_id_field() {
 #[test]
 fn resource_with_attr_overwrites_duplicate_key() {
     let resource = Resource::new("Host", "web-01")
+        .unwrap()
         .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap())
-        .with_attr("ip", AttrValue::ip("192.168.1.1").unwrap());
+        .unwrap()
+        .with_attr("ip", AttrValue::ip("192.168.1.1").unwrap())
+        .unwrap();
 
     assert_eq!(resource.attrs().len(), 1);
     assert_eq!(

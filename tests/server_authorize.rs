@@ -38,9 +38,9 @@ async fn simple_authorization(
     let allowed = s
         .client()
         .is_allowed(Request::new(
-            User::new(user),
-            Action::new(action),
-            Resource::new(kind, id),
+            User::new(user).unwrap(),
+            Action::new(action).unwrap(),
+            Resource::new(kind, id).unwrap(),
         ))
         .await
         .unwrap();
@@ -78,7 +78,7 @@ async fn dns_authorization(
         .is_allowed(Request::new(
             dns_user(user_name, groups),
             dns_action(action),
-            Resource::new("Host", "web-01.example.com"),
+            Resource::new("Host", "web-01.example.com").unwrap(),
         ))
         .await
         .unwrap();
@@ -191,7 +191,9 @@ async fn batch_mixed_allow_deny() {
 
     let batch = AuthorizeRequest::new()
         .add_request_with_id("allow", alice_view_photo())
-        .add_request_with_id("deny", bob_view_photo());
+        .unwrap()
+        .add_request_with_id("deny", bob_view_photo())
+        .unwrap();
 
     let resp = s.client().authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 2);
@@ -222,7 +224,9 @@ async fn batch_preserves_request_ids() {
 
     let batch = AuthorizeRequest::new()
         .add_request_with_id("first", alice_view_photo())
-        .add_request_with_id("second", super_any());
+        .unwrap()
+        .add_request_with_id("second", super_any())
+        .unwrap();
 
     let resp = s.client().authorize(&batch).await.unwrap();
 

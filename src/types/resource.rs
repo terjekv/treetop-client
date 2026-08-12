@@ -48,6 +48,7 @@ impl AttrValue {
 ///
 /// The `attrs` field is omitted from serialization when empty.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "ResourceWire")]
 pub struct Resource {
     /// The resource type name (e.g. `"Host"`, `"Document"`).
     kind: CedarTypeName,
@@ -58,43 +59,71 @@ pub struct Resource {
     attrs: BTreeMap<String, AttrValue>,
 }
 
+#[derive(Deserialize)]
+struct ResourceWire {
+    kind: CedarTypeName,
+    id: EntityId,
+    #[serde(default)]
+    attrs: BTreeMap<String, AttrValue>,
+}
+
+impl TryFrom<ResourceWire> for Resource {
+    type Error = ValidationError;
+
+    fn try_from(wire: ResourceWire) -> Result<Self, Self::Error> {
+        let resource = Self {
+            kind: wire.kind,
+            id: wire.id,
+            attrs: wire.attrs,
+        };
+        resource.validate()?;
+        Ok(resource)
+    }
+}
+
 impl Resource {
-    /// Creates a new resource with no attributes.
-    pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
-        Self {
+    /// Creates a validated resource with no attributes.
+    pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Result<Self, ValidationError> {
+        let resource = Self {
             kind: CedarTypeName::new(kind),
             id: EntityId::new(id),
             attrs: BTreeMap::new(),
-        }
+        };
+        resource.validate()?;
+        Ok(resource)
     }
 
     /// Creates and validates a new resource with no attributes.
+    #[deprecated(since = "0.0.2", note = "Resource::new now validates its input")]
     pub fn try_new(
         kind: impl Into<String>,
         id: impl Into<String>,
     ) -> Result<Self, ValidationError> {
-        let resource = Self::new(kind, id);
-        resource.validate()?;
-        Ok(resource)
+        Self::new(kind, id)
     }
 
     /// Adds a typed attribute to this resource (builder pattern).
     ///
     /// If the key already exists, its value is overwritten.
-    pub fn with_attr(mut self, key: impl Into<String>, value: AttrValue) -> Self {
-        self.attrs.insert(key.into(), value);
-        self
+    pub fn with_attr(
+        mut self,
+        key: impl Into<String>,
+        value: AttrValue,
+    ) -> Result<Self, ValidationError> {
+        let key = key.into();
+        validate_attribute_name(&key, "resource.attrs")?;
+        self.attrs.insert(key, value);
+        Ok(self)
     }
 
     /// Adds an attribute after validating its name.
+    #[deprecated(since = "0.0.2", note = "Resource::with_attr now validates its input")]
     pub fn try_with_attr(
         self,
         key: impl Into<String>,
         value: AttrValue,
     ) -> Result<Self, ValidationError> {
-        let resource = self.with_attr(key, value);
-        resource.validate()?;
-        Ok(resource)
+        self.with_attr(key, value)
     }
 
     /// Returns the qualified Cedar resource type.
@@ -135,7 +164,7 @@ mod tests {
 
     #[test]
     fn resource_without_attrs() {
-        let resource = Resource::new("Host", "web-01");
+        let resource = Resource::new("Host", "web-01").unwrap();
         let json = serde_json::to_value(&resource).unwrap();
         assert_eq!(json["kind"], "Host");
         assert_eq!(json["id"], "web-01");
@@ -145,10 +174,15 @@ mod tests {
     #[test]
     fn resource_with_attrs() {
         let resource = Resource::new("Document", "doc1")
+            .unwrap()
             .with_attr("owner", AttrValue::String("alice".to_string()))
+            .unwrap()
             .with_attr("public", AttrValue::Bool(false))
+            .unwrap()
             .with_attr("priority", AttrValue::Long(5))
+            .unwrap()
             .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap());
+        let resource = resource.unwrap();
         let json = serde_json::to_value(&resource).unwrap();
         assert!(json["attrs"].is_object());
         assert_eq!(json["attrs"]["owner"]["type"], "String");
@@ -176,8 +210,10 @@ mod tests {
 
     #[test]
     fn resource_roundtrip() {
-        let resource =
-            Resource::new("Host", "web-01").with_attr("ip", AttrValue::ip("10.0.0.1").unwrap());
+        let resource = Resource::new("Host", "web-01")
+            .unwrap()
+            .with_attr("ip", AttrValue::ip("10.0.0.1").unwrap())
+            .unwrap();
         let json = serde_json::to_value(&resource).unwrap();
         let deserialized: Resource = serde_json::from_value(json).unwrap();
         assert_eq!(resource, deserialized);

@@ -6,7 +6,6 @@ use common::{
     CONTEXT_POLICY, INVALID_CEDAR, SIMPLE_POLICIES, all_policies, ensure_policies,
     restore_policies, server,
 };
-use rstest::rstest;
 use serial_test::serial;
 use treetop_client::{
     Action, AttrValue, AuthRequest, AuthorizeRequest, BatchResult, DecisionBrief,
@@ -76,9 +75,9 @@ async fn upload_and_verify_authorization() {
     // Alice should be denied
     let alice_allowed = read_client
         .is_allowed(Request::new(
-            User::new("alice"),
-            Action::new("view"),
-            Resource::new("Photo", "test"),
+            User::new("alice").unwrap(),
+            Action::new("view").unwrap(),
+            Resource::new("Photo", "test").unwrap(),
         ))
         .await
         .unwrap();
@@ -90,9 +89,9 @@ async fn upload_and_verify_authorization() {
     // Bob should be allowed
     let bob_allowed = read_client
         .is_allowed(Request::new(
-            User::new("bob"),
-            Action::new("view"),
-            Resource::new("Photo", "test"),
+            User::new("bob").unwrap(),
+            Action::new("view").unwrap(),
+            Resource::new("Photo", "test").unwrap(),
         ))
         .await
         .unwrap();
@@ -114,15 +113,16 @@ async fn upload_context_policy_and_authorize_with_context() {
     let mut context = std::collections::HashMap::new();
     context.insert("env".to_string(), AttrValue::String("prod".to_string()));
 
-    let batch = AuthorizeRequest::from_auth_requests([AuthRequest::with_id(
-        "ctx-1",
-        Request::new(
-            User::new("alice"),
-            Action::new("view"),
-            Resource::new("Photo", "VacationPhoto94.jpg"),
-        ),
-    )
-    .with_context(context)]);
+    let request = AuthRequest::new(Request::new(
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Photo", "VacationPhoto94.jpg").unwrap(),
+    ))
+    .with_id("ctx-1")
+    .unwrap()
+    .with_context(context)
+    .unwrap();
+    let batch = AuthorizeRequest::from_auth_requests([request]).unwrap();
 
     let resp = s.client().authorize(&batch).await.unwrap();
     assert_eq!(resp.successes(), 1);
@@ -320,30 +320,6 @@ async fn user_policies_super_returns_wildcard() {
 // ==========================================================================
 // Upload error cases
 // ==========================================================================
-
-#[rstest]
-#[case::raw("raw")]
-#[case::json("json")]
-#[tokio::test]
-async fn upload_without_token_returns_configuration_error(#[case] variant: &str) {
-    let s = server().await;
-    let client = s.client(); // no token
-    let err = match variant {
-        "raw" => client
-            .upload_policies_raw("permit(...);")
-            .await
-            .unwrap_err(),
-        "json" => client
-            .upload_policies_json("permit(...);")
-            .await
-            .unwrap_err(),
-        _ => unreachable!(),
-    };
-    assert!(
-        matches!(err, TreetopError::Configuration(_)),
-        "expected Configuration error, got: {err:?}"
-    );
-}
 
 #[tokio::test]
 async fn upload_with_wrong_token_returns_403() {

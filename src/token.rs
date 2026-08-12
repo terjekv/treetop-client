@@ -15,16 +15,19 @@ use crate::types::ValidationError;
 pub struct UploadToken(SecretString);
 
 impl UploadToken {
-    /// Creates a new upload token from a string value.
-    pub fn new(token: impl Into<String>) -> Self {
-        Self(token.into().into())
+    /// Creates a validated upload token from a string value.
+    ///
+    /// Empty values and values that cannot be represented as an HTTP header are rejected.
+    pub fn new(token: impl Into<String>) -> Result<Self, ValidationError> {
+        let token = Self(token.into().into());
+        token.validate()?;
+        Ok(token)
     }
 
     /// Creates an upload token after validating that it can be sent as an HTTP header value.
+    #[deprecated(since = "0.0.2", note = "UploadToken::new now validates its input")]
     pub fn try_new(token: impl Into<String>) -> Result<Self, ValidationError> {
-        let token = Self::new(token);
-        token.validate()?;
-        Ok(token)
+        Self::new(token)
     }
 
     /// Validates that this token is non-empty and safe to place in an HTTP header.
@@ -68,7 +71,7 @@ mod tests {
 
     #[test]
     fn debug_does_not_leak_token() {
-        let token = UploadToken::new("super-secret-value");
+        let token = UploadToken::new("super-secret-value").unwrap();
         let debug = format!("{:?}", token);
         assert!(!debug.contains("super-secret-value"));
         assert!(debug.contains("REDACTED"));
@@ -76,25 +79,25 @@ mod tests {
 
     #[test]
     fn expose_returns_original_value() {
-        let token = UploadToken::new("my-token");
+        let token = UploadToken::new("my-token").unwrap();
         assert_eq!(token.expose(), "my-token");
     }
 
     #[test]
     fn try_new_rejects_invalid_header_values() {
-        assert!(UploadToken::try_new("").is_err());
-        assert!(UploadToken::try_new("bad\nheader").is_err());
+        assert!(UploadToken::new("").is_err());
+        assert!(UploadToken::new("bad\nheader").is_err());
     }
 
     #[test]
     fn request_header_is_marked_sensitive() {
-        let token = UploadToken::try_new("my-token").unwrap();
+        let token = UploadToken::new("my-token").unwrap();
         assert!(token.header_value().is_sensitive());
     }
 
     #[test]
     fn reflected_token_is_redacted() {
-        let token = UploadToken::try_new("super-secret-value").unwrap();
+        let token = UploadToken::new("super-secret-value").unwrap();
         let message = token.redact_from("rejected super-secret-value".to_string());
 
         assert_eq!(message, "rejected [REDACTED]");

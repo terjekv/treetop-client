@@ -11,8 +11,8 @@ use std::time::Duration;
 use regex::Regex;
 use tokio::sync::OnceCell;
 use treetop_client::{
-    Action, AuthorizeBriefResponse, BatchResult, Client, DecisionBrief, Group, Request, Resource,
-    UploadToken, User,
+    Action, AuthorizeBriefResponse, BatchResult, CanUpload, Client, DecisionBrief, Group, Request,
+    Resource, UploadToken, User,
 };
 
 // ==========================================================================
@@ -153,17 +153,17 @@ impl TestServer {
     }
 
     /// Builds a Client with the correct upload token.
-    pub fn client_with_token(&self) -> Client {
+    pub fn client_with_token(&self) -> Client<CanUpload> {
         Client::builder(&self.base_url)
-            .upload_token(UploadToken::new(&self.upload_token))
+            .upload_token(UploadToken::new(&self.upload_token).unwrap())
             .build()
             .unwrap()
     }
 
     /// Builds a Client with a wrong token (for testing 403 errors).
-    pub fn client_with_wrong_token(&self) -> Client {
+    pub fn client_with_wrong_token(&self) -> Client<CanUpload> {
         Client::builder(&self.base_url)
-            .upload_token(UploadToken::new("wrong-token-value"))
+            .upload_token(UploadToken::new("wrong-token-value").unwrap())
             .build()
             .unwrap()
     }
@@ -399,41 +399,51 @@ pub async fn restore_policies(server: &TestServer) {
 
 pub fn alice_view_photo() -> Request {
     Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Photo", "VacationPhoto94.jpg"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Photo", "VacationPhoto94.jpg").unwrap(),
     )
 }
 
 pub fn bob_view_photo() -> Request {
     Request::new(
-        User::new("bob"),
-        Action::new("view"),
-        Resource::new("Photo", "VacationPhoto94.jpg"),
+        User::new("bob").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Photo", "VacationPhoto94.jpg").unwrap(),
     )
 }
 
 pub fn super_any() -> Request {
     Request::new(
-        User::new("super"),
-        Action::new("anything"),
-        Resource::new("Whatever", "something"),
+        User::new("super").unwrap(),
+        Action::new("anything").unwrap(),
+        Resource::new("Whatever", "something").unwrap(),
     )
 }
 
 pub fn dns_user(name: &str, groups: &[&str]) -> User {
     User::new(name)
+        .unwrap()
         .with_namespace(vec!["DNS".to_string()])
+        .unwrap()
         .with_groups(
             groups
                 .iter()
-                .map(|g| Group::new(*g).with_namespace(vec!["DNS".to_string()]))
+                .map(|g| {
+                    Group::new(*g)
+                        .unwrap()
+                        .with_namespace(vec!["DNS".to_string()])
+                        .unwrap()
+                })
                 .collect(),
         )
 }
 
 pub fn dns_action(name: &str) -> Action {
-    Action::new(name).with_namespace(vec!["DNS".to_string()])
+    Action::new(name)
+        .unwrap()
+        .with_namespace(vec!["DNS".to_string()])
+        .unwrap()
 }
 
 // ==========================================================================

@@ -13,12 +13,13 @@ This version targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-re
 ## Features
 
 - **Type-driven design** -- strongly typed request/response types with serde, wire-compatible with the Treetop REST API
+- **Capability-safe uploads** -- upload methods exist only on `Client<CanUpload>` values built with a validated token
 - **Connection pooling** -- built on reqwest with configurable pool sizes and idle timeouts
 - **Secure token handling** -- upload tokens backed by `SecretString` (zeroized on drop, redacted in Debug output)
-- **Validated request boundaries** -- private request fields, Cedar identifier checks, and validated IP/header newtypes
+- **Validated construction** -- fallible constructors preserve Cedar, entity, attribute, context, and header invariants
 - **TLS by default** -- uses rustls without an OpenSSL/system-TLS dependency, with optional custom root certificates
 - **Bounded I/O** -- request and successful-response bodies are capped at 16 MiB by default, with configurable limits
-- **Builder patterns** -- ergonomic builders for client configuration, authorization requests, users, resources, and actions
+- **Fluent endpoint calls** -- typed detail and output transitions for authorization and user-policy queries
 - **Batch authorization** -- evaluate multiple authorization requests in a single API call
 - **Correlation IDs** -- clone-with-override pattern for request tracing without shared mutable state
 - **Schema management** -- download and upload Cedar schema data alongside policies
@@ -51,9 +52,9 @@ async fn main() -> treetop_client::Result<()> {
     // Simple authorization check
     let allowed = client
         .is_allowed(Request::new(
-            User::new("alice"),
-            Action::new("view"),
-            Resource::new("Document", "doc-42"),
+            User::new("alice")?,
+            Action::new("view")?,
+            Resource::new("Document", "doc-42")?,
         ))
         .await?;
 
@@ -78,9 +79,13 @@ let client = Client::builder("https://treetop.example.com")
     .max_request_bytes(16 * 1024 * 1024)
     .max_response_bytes(16 * 1024 * 1024)
     .request_limits(RequestLimits::default())
-    .upload_token(UploadToken::new("my-secret-token"))
+    .upload_token(UploadToken::new("my-secret-token")?)
     .build()?;
 ```
+
+Without `.upload_token(...)`, `build()` returns `Client<ReadOnly>` and upload methods are not
+available. Adding the token transitions the builder and resulting client to `CanUpload`; read and
+authorization methods remain available in both states.
 
 Upload tokens require HTTPS unless the destination is loopback. For an explicitly accepted
 plaintext development server, opt in with `.danger_allow_insecure_uploads(true)`. The default
@@ -115,15 +120,22 @@ traced.authorize(&request).await?;  // sends x-correlation-id header
 
 // Original client is unaffected
 client.authorize(&request).await?;  // no correlation header
+
+// Fluent endpoint calls can override correlation without cloning the client
+client
+    .authorization(&request)
+    .correlation_id("req-def-456")?
+    .send()
+    .await?;
 ```
 
 ### Authorization
 
-Request fields are private and exposed through read-only accessors. `authorize()` validates the
-complete batch before transport; `try_new` and `try_with_*` constructors are available when you
-want validation at construction time. Duplicate request IDs are rejected, and response IDs,
-indices, ordering, counts, policy versions, and decisions are checked against the submitted batch.
-`AttrValue::ip()` always validates its IP/CIDR value.
+Request fields are private and exposed through read-only accessors. Constructors and fluent
+setters validate before returning a value, while batch- and server-dependent invariants are checked
+before transport. Duplicate request IDs are rejected, and response IDs, indices, ordering, counts,
+policy versions, and decisions are checked against the submitted batch. `AttrValue::ip()` always
+validates its IP/CIDR value.
 
 #### Single check
 
@@ -132,9 +144,9 @@ use treetop_client::{Action, Request, Resource, User};
 
 let allowed = client
     .is_allowed(Request::new(
-        User::new("alice").with_group_names(&["admins"]),
-        Action::new("delete"),
-        Resource::new("Host", "web-01"),
+        User::new("alice")?.with_group_names(&["admins"])?,
+        Action::new("delete")?,
+        Resource::new("Host", "web-01")?,
     ))
     .await?;
 ```
@@ -146,18 +158,18 @@ use treetop_client::{Action, AttrValue, AuthorizeRequest, Request, Resource, Use
 
 let batch = AuthorizeRequest::new()
     .add_request(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Document", "doc-1"),
+        User::new("alice")?,
+        Action::new("view")?,
+        Resource::new("Document", "doc-1")?,
     ))
     .add_request_with_id("check-2", Request::new(
-        User::new("bob"),
-        Action::new("edit"),
-        Resource::new("Document", "doc-1")
-            .with_attr("owner", AttrValue::String("alice".to_string())),
-    ));
+        User::new("bob")?,
+        Action::new("edit")?,
+        Resource::new("Document", "doc-1")?
+            .with_attr("owner", AttrValue::String("alice".to_string()))?,
+    ))?;
 
-let response = client.authorize(&batch).await?;
+let response = client.authorization(&batch).send().await?;
 
 println!("Successful: {}, Failed: {}", response.successes(), response.failures());
 
@@ -170,7 +182,7 @@ if let Some(result) = response.find_by_id("check-2") {
 #### Detailed authorization (includes matching policies)
 
 ```rust
-let response = client.authorize_detailed(&batch).await?;
+let response = client.authorization(&batch).detailed().send().await?;
 ```
 
 ### Resources with attributes
@@ -178,11 +190,11 @@ let response = client.authorize_detailed(&batch).await?;
 ```rust
 use treetop_client::{AttrValue, Resource};
 
-let resource = Resource::new("Host", "web-01.example.com")
-    .with_attr("ip", AttrValue::ip("10.0.0.1")?)
-    .with_attr("environment", AttrValue::String("production".to_string()))
-    .with_attr("critical", AttrValue::Bool(true))
-    .with_attr("priority", AttrValue::Long(1));
+let resource = Resource::new("Host", "web-01.example.com")?
+    .with_attr("ip", AttrValue::ip("10.0.0.1")?)?
+    .with_attr("environment", AttrValue::String("production".to_string()))?
+    .with_attr("critical", AttrValue::Bool(true))?
+    .with_attr("priority", AttrValue::Long(1))?;
 ```
 
 ### Namespaced types
@@ -192,15 +204,15 @@ Users, groups, and actions support Cedar namespaces:
 ```rust
 use treetop_client::{Action, Group, User};
 
-let user = User::new("alice")
-    .with_namespace(vec!["MyApp".to_string()])
-    .with_group_names(&["admins", "editors"]);
+let user = User::new("alice")?
+    .with_namespace(vec!["MyApp".to_string()])?
+    .with_group_names(&["admins", "editors"])?;
 
-let action = Action::new("delete")
-    .with_namespace(vec!["Admin".to_string()]);
+let action = Action::new("delete")?
+    .with_namespace(vec!["Admin".to_string()])?;
 
-let group = Group::new("superusers")
-    .with_namespace(vec!["MyApp".to_string()]);
+let group = Group::new("superusers")?
+    .with_namespace(vec!["MyApp".to_string()])?;
 ```
 
 ### Policy management
@@ -219,7 +231,10 @@ let metadata = client
 
 // List policies for a specific user
 let user_policies = client
-    .get_user_policies("alice", &["admins".into()], &["MyApp".into()])
+    .user_policies("alice")?
+    .group("admins")?
+    .namespace("MyApp")?
+    .send()
     .await?;
 ```
 
@@ -267,14 +282,14 @@ let mut context = HashMap::new();
 context.insert("env".to_string(), AttrValue::String("prod".to_string()));
 
 let request = AuthRequest::new(Request::new(
-    User::new("alice"),
-    Action::new("view"),
-    Resource::new("Photo", "VacationPhoto94.jpg"),
+    User::new("alice")?,
+    Action::new("view")?,
+    Resource::new("Photo", "VacationPhoto94.jpg")?,
 ))
-    .with_context(context);
-let batch = AuthorizeRequest::from_auth_requests([request]);
+    .with_context(context)?;
+let batch = AuthorizeRequest::from_auth_requests([request])?;
 
-let response = client.authorize(&batch).await?;
+let response = client.authorization(&batch).send().await?;
 ```
 
 Inspect `status.request_context` if you need to know whether the server runtime is currently schema-backed or running in permissive fallback mode. Uploading a schema via `upload_schema_raw()` or `upload_schema_json()` lets you verify the schema-backed path explicitly.

@@ -22,32 +22,36 @@ pub struct Group {
 }
 
 impl Group {
-    /// Creates a new group with no namespace.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self {
+    /// Creates a validated group with no namespace.
+    pub fn new(id: impl Into<String>) -> Result<Self, ValidationError> {
+        let group = Self {
             id: EntityId::new(id),
             namespace: Namespace::default(),
-        }
+        };
+        group.validate()?;
+        Ok(group)
     }
 
     /// Creates and validates a new group with no namespace.
+    #[deprecated(since = "0.0.2", note = "Group::new now validates its input")]
     pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
-        let group = Self::new(id);
-        group.validate()?;
-        Ok(group)
-    }
-
-    /// Sets the Cedar namespace for this group.
-    pub fn with_namespace(mut self, namespace: Vec<String>) -> Self {
-        self.namespace = Namespace::new(namespace);
-        self
+        Self::new(id)
     }
 
     /// Sets and validates the Cedar namespace for this group.
+    pub fn with_namespace(mut self, namespace: Vec<String>) -> Result<Self, ValidationError> {
+        self.namespace = Namespace::new(namespace);
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Sets and validates the Cedar namespace for this group.
+    #[deprecated(
+        since = "0.0.2",
+        note = "Group::with_namespace now validates its input"
+    )]
     pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
-        let group = self.with_namespace(namespace);
-        group.validate()?;
-        Ok(group)
+        self.with_namespace(namespace)
     }
 
     /// Returns the group entity identifier.
@@ -86,33 +90,34 @@ pub struct User {
 }
 
 impl User {
-    /// Creates a new user with no namespace or groups.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self {
+    /// Creates a validated user with no namespace or groups.
+    pub fn new(id: impl Into<String>) -> Result<Self, ValidationError> {
+        let user = Self {
             id: EntityId::new(id),
             namespace: Namespace::default(),
             groups: Vec::new(),
-        }
+        };
+        user.validate()?;
+        Ok(user)
     }
 
     /// Creates and validates a new user with no namespace or groups.
+    #[deprecated(since = "0.0.2", note = "User::new now validates its input")]
     pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
-        let user = Self::new(id);
-        user.validate()?;
-        Ok(user)
-    }
-
-    /// Sets the Cedar namespace for this user.
-    pub fn with_namespace(mut self, namespace: Vec<String>) -> Self {
-        self.namespace = Namespace::new(namespace);
-        self
+        Self::new(id)
     }
 
     /// Sets and validates the Cedar namespace for this user.
+    pub fn with_namespace(mut self, namespace: Vec<String>) -> Result<Self, ValidationError> {
+        self.namespace = Namespace::new(namespace);
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Sets and validates the Cedar namespace for this user.
+    #[deprecated(since = "0.0.2", note = "User::with_namespace now validates its input")]
     pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
-        let user = self.with_namespace(namespace);
-        user.validate()?;
-        Ok(user)
+        self.with_namespace(namespace)
     }
 
     /// Sets the group memberships using pre-built [`Group`] values.
@@ -124,9 +129,12 @@ impl User {
     /// Sets group memberships from a list of group name strings (no namespaces).
     ///
     /// This is a convenience method for the common case where groups have no namespace.
-    pub fn with_group_names(mut self, names: &[&str]) -> Self {
-        self.groups = names.iter().map(|n| Group::new(*n)).collect();
-        self
+    pub fn with_group_names(mut self, names: &[&str]) -> Result<Self, ValidationError> {
+        self.groups = names
+            .iter()
+            .map(|name| Group::new(*name))
+            .collect::<Result<_, _>>()?;
+        Ok(self)
     }
 
     /// Returns the user entity identifier.
@@ -197,7 +205,7 @@ mod tests {
 
     #[test]
     fn user_serialization_without_groups() {
-        let user = User::new("alice");
+        let user = User::new("alice").unwrap();
         let json = serde_json::to_value(&user).unwrap();
         assert_eq!(json["id"], "alice");
         assert_eq!(json["namespace"], serde_json::json!([]));
@@ -207,8 +215,11 @@ mod tests {
     #[test]
     fn user_serialization_with_groups_and_namespace() {
         let user = User::new("alice")
+            .unwrap()
             .with_namespace(vec!["App".to_string()])
-            .with_group_names(&["admins", "users"]);
+            .unwrap()
+            .with_group_names(&["admins", "users"])
+            .unwrap();
         let json = serde_json::to_value(&user).unwrap();
         assert_eq!(json["id"], "alice");
         assert_eq!(json["namespace"], serde_json::json!(["App"]));
@@ -218,7 +229,7 @@ mod tests {
 
     #[test]
     fn principal_user_serialization() {
-        let principal = Principal::User(User::new("alice"));
+        let principal = Principal::User(User::new("alice").unwrap());
         let json = serde_json::to_value(&principal).unwrap();
         assert!(json["User"].is_object());
         assert_eq!(json["User"]["id"], "alice");
@@ -226,7 +237,7 @@ mod tests {
 
     #[test]
     fn principal_group_serialization() {
-        let principal = Principal::Group(Group::new("admins"));
+        let principal = Principal::Group(Group::new("admins").unwrap());
         let json = serde_json::to_value(&principal).unwrap();
         assert!(json["Group"].is_object());
         assert_eq!(json["Group"]["id"], "admins");
@@ -235,9 +246,14 @@ mod tests {
     #[test]
     fn user_roundtrip() {
         let user = User::new("bob")
+            .unwrap()
             .with_namespace(vec!["Infra".to_string()])
+            .unwrap()
             .with_groups(vec![
-                Group::new("ops").with_namespace(vec!["Infra".to_string()]),
+                Group::new("ops")
+                    .unwrap()
+                    .with_namespace(vec!["Infra".to_string()])
+                    .unwrap(),
             ]);
         let json = serde_json::to_value(&user).unwrap();
         let deserialized: User = serde_json::from_value(json).unwrap();

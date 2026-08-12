@@ -76,6 +76,7 @@ impl Request {
 /// additional key-value pairs available to Cedar policy conditions. The inner
 /// [`Request`] fields are flattened into the same JSON object.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "AuthRequestWire")]
 pub struct AuthRequest {
     /// Optional client-provided identifier for correlating this request with its result.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,38 +99,44 @@ impl AuthRequest {
         }
     }
 
-    /// Creates an authorization request with a client-provided correlation ID.
-    pub fn with_id(id: impl Into<String>, request: Request) -> Self {
-        Self {
-            id: Some(RequestId::new(id)),
-            context: None,
-            request,
-        }
+    /// Sets a validated client-provided correlation ID.
+    pub fn with_id(mut self, id: impl Into<String>) -> Result<Self, ValidationError> {
+        let id = RequestId::new(id);
+        id.validate()?;
+        self.id = Some(id);
+        Ok(self)
     }
 
-    /// Sets request-scoped context values available to Cedar policy conditions.
-    pub fn with_context(mut self, context: HashMap<String, AttrValue>) -> Self {
+    /// Sets validated request-scoped context values available to Cedar policy conditions.
+    pub fn with_context(
+        mut self,
+        context: HashMap<String, AttrValue>,
+    ) -> Result<Self, ValidationError> {
+        for key in context.keys() {
+            validate_attribute_name(key, "auth_request.context")?;
+        }
         if !context.is_empty() {
             self.context = Some(context);
         }
-        self
+        Ok(self)
     }
 
     /// Creates an authorization request with a validated client-provided correlation ID.
+    #[deprecated(since = "0.0.2", note = "use AuthRequest::new(request).with_id(id)")]
     pub fn try_with_id(id: impl Into<String>, request: Request) -> Result<Self, ValidationError> {
-        let request = Self::with_id(id, request);
-        request.validate()?;
-        Ok(request)
+        Self::new(request).with_id(id)
     }
 
     /// Sets context after validating all context keys.
+    #[deprecated(
+        since = "0.0.2",
+        note = "AuthRequest::with_context now validates its input"
+    )]
     pub fn try_with_context(
         self,
         context: HashMap<String, AttrValue>,
     ) -> Result<Self, ValidationError> {
-        let request = self.with_context(context);
-        request.validate()?;
-        Ok(request)
+        self.with_context(context)
     }
 
     /// Returns the optional client-provided correlation ID.
@@ -197,6 +204,30 @@ impl AuthRequest {
     }
 }
 
+#[derive(Deserialize)]
+struct AuthRequestWire {
+    #[serde(default)]
+    id: Option<RequestId>,
+    #[serde(default)]
+    context: Option<HashMap<String, AttrValue>>,
+    #[serde(flatten)]
+    request: Request,
+}
+
+impl TryFrom<AuthRequestWire> for AuthRequest {
+    type Error = ValidationError;
+
+    fn try_from(wire: AuthRequestWire) -> Result<Self, Self::Error> {
+        let request = Self {
+            id: wire.id,
+            context: wire.context.filter(|context| !context.is_empty()),
+            request: wire.request,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+}
+
 impl From<Request> for AuthRequest {
     fn from(request: Request) -> Self {
         Self::new(request)
@@ -214,10 +245,12 @@ impl From<Request> for AuthRequest {
 /// use treetop_client::{AuthorizeRequest, Request, User, Action, Resource};
 ///
 /// let batch = AuthorizeRequest::new()
-///     .add_request(Request::new(User::new("alice"), Action::new("view"), Resource::new("Doc", "1")))
-///     .add_request_with_id("check-2", Request::new(User::new("bob"), Action::new("edit"), Resource::new("Doc", "1")));
+///     .add_request(Request::new(User::new("alice").unwrap(), Action::new("view").unwrap(), Resource::new("Doc", "1").unwrap()))
+///     .add_request_with_id("check-2", Request::new(User::new("bob").unwrap(), Action::new("edit").unwrap(), Resource::new("Doc", "1").unwrap()))
+///     .unwrap();
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(try_from = "AuthorizeRequestWire")]
 pub struct AuthorizeRequest {
     /// The list of authorization requests in this batch.
     requests: Vec<AuthRequest>,
@@ -246,10 +279,14 @@ impl AuthorizeRequest {
     }
 
     /// Creates a batch from pre-built requests, preserving their IDs and context values.
-    pub fn from_auth_requests(requests: impl IntoIterator<Item = AuthRequest>) -> Self {
-        Self {
+    pub fn from_auth_requests(
+        requests: impl IntoIterator<Item = AuthRequest>,
+    ) -> Result<Self, ValidationError> {
+        let request = Self {
             requests: requests.into_iter().collect(),
-        }
+        };
+        request.validate()?;
+        Ok(request)
     }
 
     /// Adds a request without a correlation ID to this batch (builder pattern).
@@ -259,19 +296,42 @@ impl AuthorizeRequest {
     }
 
     /// Adds a request with a client-provided correlation ID to this batch (builder pattern).
-    pub fn add_request_with_id(mut self, id: impl Into<String>, request: Request) -> Self {
-        self.requests.push(AuthRequest::with_id(id, request));
-        self
-    }
-
-    /// Adds a request after validating its client-provided correlation ID.
-    pub fn try_add_request_with_id(
-        mut self,
+    pub fn add_request_with_id(
+        self,
         id: impl Into<String>,
         request: Request,
     ) -> Result<Self, ValidationError> {
-        self.requests.push(AuthRequest::try_with_id(id, request)?);
+        self.add_auth_request(AuthRequest::new(request).with_id(id)?)
+    }
+
+    /// Adds a pre-built authorization request after checking batch-wide invariants.
+    pub fn add_auth_request(mut self, request: AuthRequest) -> Result<Self, ValidationError> {
+        if let Some(id) = request.id() {
+            if self
+                .requests
+                .iter()
+                .any(|existing| existing.id() == Some(id))
+            {
+                return Err(ValidationError::DuplicateRequestId {
+                    value: id.to_string(),
+                });
+            }
+        }
+        self.requests.push(request);
         Ok(self)
+    }
+
+    /// Adds a request after validating its client-provided correlation ID.
+    #[deprecated(
+        since = "0.0.2",
+        note = "AuthorizeRequest::add_request_with_id now validates its input"
+    )]
+    pub fn try_add_request_with_id(
+        self,
+        id: impl Into<String>,
+        request: Request,
+    ) -> Result<Self, ValidationError> {
+        self.add_request_with_id(id, request)
     }
 
     /// Returns all requests in this batch.
@@ -313,6 +373,19 @@ impl AuthorizeRequest {
             request.validate_context(limits)?;
         }
         Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct AuthorizeRequestWire {
+    requests: Vec<AuthRequest>,
+}
+
+impl TryFrom<AuthorizeRequestWire> for AuthorizeRequest {
+    type Error = ValidationError;
+
+    fn try_from(wire: AuthorizeRequestWire) -> Result<Self, Self::Error> {
+        Self::from_auth_requests(wire.requests)
     }
 }
 
@@ -370,9 +443,9 @@ mod tests {
 
     fn sample_request() -> Request {
         Request::new(
-            User::new("alice"),
-            Action::new("create"),
-            Resource::new("Host", "web-01"),
+            User::new("alice").unwrap(),
+            Action::new("create").unwrap(),
+            Resource::new("Host", "web-01").unwrap(),
         )
     }
 
@@ -389,7 +462,7 @@ mod tests {
 
     #[test]
     fn auth_request_flattens_request() {
-        let auth = AuthRequest::with_id("req-1", sample_request());
+        let auth = AuthRequest::new(sample_request()).with_id("req-1").unwrap();
         let json = serde_json::to_value(&auth).unwrap();
 
         assert_eq!(json["id"], "req-1");
@@ -402,7 +475,9 @@ mod tests {
         let mut context = HashMap::new();
         context.insert("env".to_string(), AttrValue::String("prod".to_string()));
 
-        let auth = AuthRequest::new(sample_request()).with_context(context);
+        let auth = AuthRequest::new(sample_request())
+            .with_context(context)
+            .unwrap();
         let json = serde_json::to_value(&auth).unwrap();
 
         assert_eq!(json["context"]["env"]["type"], "String");
@@ -411,7 +486,9 @@ mod tests {
 
     #[test]
     fn auth_request_empty_context_is_omitted() {
-        let auth = AuthRequest::new(sample_request()).with_context(HashMap::new());
+        let auth = AuthRequest::new(sample_request())
+            .with_context(HashMap::new())
+            .unwrap();
         let json = serde_json::to_value(&auth).unwrap();
 
         assert!(json.get("context").is_none());
@@ -421,7 +498,8 @@ mod tests {
     fn authorize_request_builder() {
         let req = AuthorizeRequest::new()
             .add_request(sample_request())
-            .add_request_with_id("req-2", sample_request());
+            .add_request_with_id("req-2", sample_request())
+            .unwrap();
 
         assert_eq!(req.requests().len(), 2);
         assert!(req.requests()[0].id().is_none());
@@ -438,10 +516,11 @@ mod tests {
     fn authorize_request_rejects_duplicate_ids() {
         let request = AuthorizeRequest::new()
             .add_request_with_id("duplicate", sample_request())
+            .unwrap()
             .add_request_with_id("duplicate", sample_request());
 
         assert!(matches!(
-            request.validate(),
+            request,
             Err(ValidationError::DuplicateRequestId { value }) if value == "duplicate"
         ));
     }

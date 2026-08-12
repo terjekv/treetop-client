@@ -10,14 +10,16 @@ use serde::de::DeserializeOwned;
 use url::Host;
 
 use crate::error::{Result, TreetopError};
-use crate::token::UploadToken;
 use crate::types::{
     AuthorizeBriefResponse, AuthorizeDetailedResponse, AuthorizeRequest, BatchResult,
     DecisionBrief, EntityId, Namespace, PoliciesDownload, PoliciesMetadata, Request, RequestLimits,
     SchemaDownload, StatusResponse, UserPolicies, ValidationError, VersionInfo,
 };
 
+use super::authorization::Authorization;
 use super::builder::ClientBuilder;
+use super::capability::{CanUpload, ReadOnly};
+use super::user_policies::UserPoliciesRequest;
 
 const CORRELATION_HEADER: &str = "x-correlation-id";
 const ERROR_BODY_LIMIT: usize = 64 * 1024;
@@ -156,17 +158,37 @@ impl RequestSizeLimit {
     }
 }
 
-struct ClientState {
+pub(super) struct ClientState {
     http: reqwest::Client,
     base_url: BaseUrl,
     api_base: Url,
-    upload_token: Option<UploadToken>,
     max_request_bytes: RequestSizeLimit,
     max_response_bytes: ResponseSizeLimit,
     request_limits: RequestLimits,
+    upload_redactor: Option<CanUpload>,
 }
 
 impl ClientState {
+    pub(super) fn new(
+        http: reqwest::Client,
+        base_url: BaseUrl,
+        max_request_bytes: RequestSizeLimit,
+        max_response_bytes: ResponseSizeLimit,
+        request_limits: RequestLimits,
+        upload_redactor: Option<CanUpload>,
+    ) -> Self {
+        let api_base = base_url.api_base();
+        Self {
+            http,
+            base_url,
+            api_base,
+            max_request_bytes,
+            max_response_bytes,
+            request_limits,
+            upload_redactor,
+        }
+    }
+
     fn endpoint(&self, path: &str) -> Url {
         self.api_base
             .join(path.trim_start_matches('/'))
@@ -194,70 +216,89 @@ impl ClientState {
 /// # async fn example() -> treetop_client::Result<()> {
 /// let client = Client::builder("https://treetop.example.com").build()?;
 /// let allowed = client
-///     .is_allowed(Request::new(User::new("alice"), Action::new("view"), Resource::new("Doc", "1")))
+///     .is_allowed(Request::new(User::new("alice").unwrap(), Action::new("view").unwrap(), Resource::new("Doc", "1").unwrap()))
 ///     .await?;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Upload capability
+///
+/// Upload methods are absent unless a validated upload token transitions the builder to
+/// [`CanUpload`]:
+///
+/// ```compile_fail
+/// use treetop_client::Client;
+///
+/// let client = Client::builder("https://treetop.example.com").build().unwrap();
+/// let _request = client.upload_policies_raw("permit(principal, action, resource);");
+/// ```
 #[derive(Clone)]
-pub struct Client {
+pub struct Client<Capability = ReadOnly> {
     state: Arc<ClientState>,
     correlation_id: Option<CorrelationId>,
+    capability: Capability,
 }
 
-impl Client {
-    pub(super) fn new(
-        http: reqwest::Client,
-        base_url: BaseUrl,
-        upload_token: Option<UploadToken>,
-        correlation_id: Option<CorrelationId>,
-        max_request_bytes: RequestSizeLimit,
-        max_response_bytes: ResponseSizeLimit,
-        request_limits: RequestLimits,
-    ) -> Self {
-        let api_base = base_url.api_base();
-        Self {
-            state: Arc::new(ClientState {
-                http,
-                base_url,
-                api_base,
-                upload_token,
-                max_request_bytes,
-                max_response_bytes,
-                request_limits,
-            }),
-            correlation_id,
-        }
-    }
-
+impl Client<ReadOnly> {
     /// Creates a [`ClientBuilder`] for the given Treetop server base URL.
     ///
     /// The URL should include the scheme and host (e.g. `"https://treetop.example.com"`).
-    pub fn builder(base_url: impl Into<String>) -> ClientBuilder {
+    pub fn builder(base_url: impl Into<String>) -> ClientBuilder<ReadOnly> {
         ClientBuilder::new(base_url)
+    }
+}
+
+impl<Capability> Client<Capability> {
+    pub(super) fn new(
+        state: ClientState,
+        correlation_id: Option<CorrelationId>,
+        capability: Capability,
+    ) -> Self {
+        Self {
+            state: Arc::new(state),
+            correlation_id,
+            capability,
+        }
     }
 
     /// Returns a new `Client` sharing the same connection pool but with the given correlation ID.
     ///
     /// The correlation ID is sent as the `x-correlation-id` header on every request
     /// made through the returned client. The original client is unaffected.
-    pub fn with_correlation_id(&self, id: impl Into<String>) -> Result<Client> {
+    pub fn with_correlation_id(&self, id: impl Into<String>) -> Result<Client<Capability>>
+    where
+        Capability: Clone,
+    {
         Ok(Client {
             state: Arc::clone(&self.state),
             correlation_id: Some(CorrelationId::parse(id.into())?),
+            capability: self.capability.clone(),
         })
     }
 
     /// Returns a new `Client` sharing the same connection pool but without a correlation ID.
-    pub fn without_correlation_id(&self) -> Client {
+    pub fn without_correlation_id(&self) -> Client<Capability>
+    where
+        Capability: Clone,
+    {
         Client {
             state: Arc::clone(&self.state),
             correlation_id: None,
+            capability: self.capability.clone(),
         }
     }
 
     fn apply_headers(&self, builder: RequestBuilder) -> RequestBuilder {
-        if let Some(cid) = &self.correlation_id {
+        self.apply_headers_with_correlation(builder, None)
+    }
+
+    fn apply_headers_with_correlation(
+        &self,
+        builder: RequestBuilder,
+        correlation_id: Option<&CorrelationId>,
+    ) -> RequestBuilder {
+        if let Some(cid) = correlation_id.or(self.correlation_id.as_ref()) {
             builder.header(CORRELATION_HEADER, cid.as_header())
         } else {
             builder
@@ -349,27 +390,37 @@ impl Client {
     }
 
     async fn get_text(&self, url: Url) -> Result<String> {
+        self.get_text_with_correlation(url, None).await
+    }
+
+    async fn get_text_with_correlation(
+        &self,
+        url: Url,
+        correlation_id: Option<&CorrelationId>,
+    ) -> Result<String> {
         let resp = self
-            .apply_headers(self.state.http.get(url))
+            .apply_headers_with_correlation(self.state.http.get(url), correlation_id)
             .send()
             .await
             .map_err(TreetopError::Transport)?;
         self.handle_text_response(resp).await
     }
 
-    async fn post_json<T: DeserializeOwned, B: Serialize>(
+    async fn post_json_with_correlation<T: DeserializeOwned, B: Serialize>(
         &self,
         path: &str,
         body: &B,
+        correlation_id: Option<&CorrelationId>,
     ) -> Result<T> {
         let body = self.serialize_json_body(body)?;
         let resp = self
-            .apply_headers(
+            .apply_headers_with_correlation(
                 self.state
                     .http
                     .post(self.state.endpoint(path))
                     .header(CONTENT_TYPE, "application/json")
                     .body(body),
+                correlation_id,
             )
             .send()
             .await
@@ -396,18 +447,11 @@ impl Client {
         }
     }
 
-    fn upload_token(&self) -> Result<&UploadToken> {
-        self.state
-            .upload_token
-            .as_ref()
-            .ok_or_else(|| TreetopError::Configuration("no upload token configured".to_string()))
-    }
-
     fn redact_upload_token(&self, message: String) -> String {
-        let Some(token) = &self.state.upload_token else {
+        let Some(redactor) = &self.state.upload_redactor else {
             return message;
         };
-        token.redact_from(message)
+        redactor.token().redact_from(message)
     }
 
     // --- Public API ---
@@ -445,15 +489,32 @@ impl Client {
         self.get("/status").await
     }
 
+    /// Starts a fluent authorization call with brief output selected by default.
+    pub fn authorization<'a>(
+        &'a self,
+        request: &'a AuthorizeRequest,
+    ) -> Authorization<'a, Capability> {
+        Authorization::new(self, request)
+    }
+
     /// Evaluates a batch of authorization requests and returns brief results
     /// (decision + policy IDs, no full policy text).
     ///
     /// Sends `POST /api/v1/authorize?detail=brief`.
     pub async fn authorize(&self, request: &AuthorizeRequest) -> Result<AuthorizeBriefResponse> {
+        self.authorization(request).send().await
+    }
+
+    pub(super) async fn send_authorization_brief(
+        &self,
+        request: &AuthorizeRequest,
+        correlation_id: Option<&CorrelationId>,
+    ) -> Result<AuthorizeBriefResponse> {
         request.validate()?;
         request.validate_context(self.state.request_limits)?;
-        let response: AuthorizeBriefResponse =
-            self.post_json("authorize?detail=brief", request).await?;
+        let response: AuthorizeBriefResponse = self
+            .post_json_with_correlation("authorize?detail=brief", request, correlation_id)
+            .await?;
         response.validate_against(request)?;
         Ok(response)
     }
@@ -466,10 +527,19 @@ impl Client {
         &self,
         request: &AuthorizeRequest,
     ) -> Result<AuthorizeDetailedResponse> {
+        self.authorization(request).detailed().send().await
+    }
+
+    pub(super) async fn send_authorization_detailed(
+        &self,
+        request: &AuthorizeRequest,
+        correlation_id: Option<&CorrelationId>,
+    ) -> Result<AuthorizeDetailedResponse> {
         request.validate()?;
         request.validate_context(self.state.request_limits)?;
-        let response: AuthorizeDetailedResponse =
-            self.post_json("authorize?detail=full", request).await?;
+        let response: AuthorizeDetailedResponse = self
+            .post_json_with_correlation("authorize?detail=full", request, correlation_id)
+            .await?;
         response.validate_against(request)?;
         Ok(response)
     }
@@ -517,14 +587,16 @@ impl Client {
         self.get_text(self.state.endpoint("schema?format=raw"))
             .await
     }
+}
 
+impl Client<CanUpload> {
     /// Uploads policies as raw Cedar DSL text via `POST /api/v1/policies`.
     ///
     /// Requires an upload token to be configured on the client
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated policy metadata on success.
     pub async fn upload_policies_raw(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self.upload_token()?;
+        let token = self.capability.token();
         self.validate_raw_body(content)?;
 
         let resp = self
@@ -550,7 +622,7 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated policy metadata on success.
     pub async fn upload_policies_json(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self.upload_token()?;
+        let token = self.capability.token();
 
         #[derive(Serialize)]
         struct Upload<'a> {
@@ -579,7 +651,7 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated server metadata on success.
     pub async fn upload_schema_raw(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self.upload_token()?;
+        let token = self.capability.token();
         self.validate_raw_body(content)?;
 
         let resp = self
@@ -606,7 +678,7 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated server metadata on success.
     pub async fn upload_schema_json(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token = self.upload_token()?;
+        let token = self.capability.token();
 
         #[derive(Serialize)]
         struct Upload<'a> {
@@ -628,6 +700,16 @@ impl Client {
             .map_err(TreetopError::Transport)?;
         self.handle_response(resp).await
     }
+}
+
+impl<Capability> Client<Capability> {
+    /// Starts a fluent query for policies that apply to a specific user.
+    pub fn user_policies(
+        &self,
+        user: impl Into<String>,
+    ) -> Result<UserPoliciesRequest<'_, Capability>> {
+        UserPoliciesRequest::new(self, user)
+    }
 
     /// Lists policies that apply to a specific user from `GET /api/v1/policies/{user}`.
     ///
@@ -638,9 +720,27 @@ impl Client {
         groups: &[String],
         namespaces: &[String],
     ) -> Result<UserPolicies> {
-        let url = self.build_user_policies_url(user, groups, namespaces, false)?;
+        let mut request = self.user_policies(user)?;
+        for group in groups {
+            request = request.group(group)?;
+        }
+        for namespace in namespaces {
+            request = request.namespace(namespace)?;
+        }
+        request.send().await
+    }
+
+    pub(super) async fn send_user_policies(
+        &self,
+        user: &str,
+        groups: &[String],
+        namespaces: &[String],
+        raw: bool,
+        correlation_id: Option<&CorrelationId>,
+    ) -> Result<UserPolicies> {
+        let url = self.build_user_policies_url(user, groups, namespaces, raw)?;
         let resp = self
-            .apply_headers(self.state.http.get(url))
+            .apply_headers_with_correlation(self.state.http.get(url), correlation_id)
             .send()
             .await
             .map_err(TreetopError::Transport)?;
@@ -657,8 +757,26 @@ impl Client {
         groups: &[String],
         namespaces: &[String],
     ) -> Result<String> {
-        let url = self.build_user_policies_url(user, groups, namespaces, true)?;
-        self.get_text(url).await
+        let mut request = self.user_policies(user)?;
+        for group in groups {
+            request = request.group(group)?;
+        }
+        for namespace in namespaces {
+            request = request.namespace(namespace)?;
+        }
+        request.raw().send().await
+    }
+
+    pub(super) async fn send_user_policies_raw(
+        &self,
+        user: &str,
+        groups: &[String],
+        namespaces: &[String],
+        raw: bool,
+        correlation_id: Option<&CorrelationId>,
+    ) -> Result<String> {
+        let url = self.build_user_policies_url(user, groups, namespaces, raw)?;
+        self.get_text_with_correlation(url, correlation_id).await
     }
 
     /// Fetches Prometheus metrics from the server's `GET /metrics` endpoint.
@@ -764,14 +882,21 @@ impl Write for BoundedJsonWriter {
     }
 }
 
-impl std::fmt::Debug for Client {
+impl std::fmt::Debug for Client<ReadOnly> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
             .field("base_url", &self.state.base_url.as_str())
-            .field(
-                "upload_token",
-                &self.state.upload_token.as_ref().map(|_| "[SET]"),
-            )
+            .field("upload_token", &Option::<&str>::None)
+            .field("correlation_id", &self.correlation_id)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for Client<CanUpload> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("base_url", &self.state.base_url.as_str())
+            .field("upload_token", &Some("[SET]"))
             .field("correlation_id", &self.correlation_id)
             .finish()
     }

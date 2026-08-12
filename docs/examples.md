@@ -33,7 +33,7 @@ let client = Client::builder("https://treetop.example.com")
     .request_timeout(Duration::from_secs(15))
     .pool_idle_timeout(Duration::from_secs(120))
     .pool_max_idle_per_host(20)
-    .upload_token(UploadToken::new("my-secret-token"))
+    .upload_token(UploadToken::new("my-secret-token")?)
     .correlation_id("service-startup")
     .build()?;
 ```
@@ -53,7 +53,7 @@ let reqwest_client = reqwest::Client::builder()
 
 let client = Client::builder("https://treetop.example.com")
     .with_reqwest_client(reqwest_client)
-    .upload_token(UploadToken::new("token"))
+    .upload_token(UploadToken::new("token")?)
     .build()?;
 ```
 
@@ -68,9 +68,9 @@ use treetop_client::{Action, Request, Resource, User};
 
 let allowed = client
     .is_allowed(Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Document", "quarterly-report"),
+        User::new("alice")?,
+        Action::new("view")?,
+        Resource::new("Document", "quarterly-report")?,
     ))
     .await?;
 
@@ -86,17 +86,17 @@ if allowed {
 ```rust
 use treetop_client::{Action, Group, Request, Resource, User};
 
-let user = User::new("alice")
-    .with_namespace(vec!["DNS".to_string()])
+let user = User::new("alice")?
+    .with_namespace(vec!["DNS".to_string()])?
     .with_groups(vec![
-        Group::new("admins").with_namespace(vec!["DNS".to_string()]),
-        Group::new("operators"),
+        Group::new("admins")?.with_namespace(vec!["DNS".to_string()])?,
+        Group::new("operators")?,
     ]);
 
 let request = Request::new(
     user,
-    Action::new("create_host").with_namespace(vec!["DNS".to_string()]),
-    Resource::new("Host", "web-01.example.com"),
+    Action::new("create_host")?.with_namespace(vec!["DNS".to_string()])?,
+    Resource::new("Host", "web-01.example.com")?,
 );
 
 let allowed = client.is_allowed(request).await?;
@@ -109,23 +109,23 @@ Attributes are used in Cedar policy conditions (e.g. `when { resource.ip.isInRan
 ```rust
 use treetop_client::{Action, AttrValue, Request, Resource, User};
 
-let resource = Resource::new("Host", "web-01.example.com")
-    .with_attr("ip", AttrValue::ip("10.0.0.1")?)
-    .with_attr("name", AttrValue::String("web-01.example.com".to_string()))
-    .with_attr("critical", AttrValue::Bool(true))
-    .with_attr("priority", AttrValue::Long(1))
+let resource = Resource::new("Host", "web-01.example.com")?
+    .with_attr("ip", AttrValue::ip("10.0.0.1")?)?
+    .with_attr("name", AttrValue::String("web-01.example.com".to_string()))?
+    .with_attr("critical", AttrValue::Bool(true))?
+    .with_attr("priority", AttrValue::Long(1))?
     .with_attr(
         "tags",
         AttrValue::Set(vec![
             AttrValue::String("production".to_string()),
             AttrValue::String("web".to_string()),
         ]),
-    );
+    )?;
 
 let allowed = client
     .is_allowed(Request::new(
-        User::new("alice"),
-        Action::new("delete"),
+        User::new("alice")?,
+        Action::new("delete")?,
         resource,
     ))
     .await?;
@@ -141,22 +141,22 @@ use treetop_client::{Action, AuthorizeRequest, BatchResult, Request, Resource, U
 
 let batch = AuthorizeRequest::new()
     .add_request_with_id("alice-view", Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Document", "doc-1"),
-    ))
+        User::new("alice")?,
+        Action::new("view")?,
+        Resource::new("Document", "doc-1")?,
+    ))?
     .add_request_with_id("bob-edit", Request::new(
-        User::new("bob"),
-        Action::new("edit"),
-        Resource::new("Document", "doc-1"),
-    ))
+        User::new("bob")?,
+        Action::new("edit")?,
+        Resource::new("Document", "doc-1")?,
+    ))?
     .add_request_with_id("charlie-delete", Request::new(
-        User::new("charlie"),
-        Action::new("delete"),
-        Resource::new("Document", "doc-1"),
-    ));
+        User::new("charlie")?,
+        Action::new("delete")?,
+        Resource::new("Document", "doc-1")?,
+    ))?;
 
-let response = client.authorize(&batch).await?;
+let response = client.authorization(&batch).send().await?;
 
 println!(
     "Policy version: {} (loaded at {})",
@@ -192,17 +192,17 @@ use treetop_client::{Action, AuthorizeRequest, Request, Resource, User};
 let users = vec!["alice", "bob", "charlie"];
 let requests: Vec<Request> = users
     .iter()
-    .map(|name| {
-        Request::new(
-            User::new(*name),
-            Action::new("view"),
-            Resource::new("Dashboard", "main"),
-        )
+    .map(|name| -> std::result::Result<_, treetop_client::ValidationError> {
+        Ok(Request::new(
+            User::new(*name)?,
+            Action::new("view")?,
+            Resource::new("Dashboard", "main")?,
+        ))
     })
-    .collect();
+    .collect::<std::result::Result<_, _>>()?;
 
 let batch = AuthorizeRequest::from_requests(requests);
-let response = client.authorize(&batch).await?;
+let response = client.authorization(&batch).send().await?;
 ```
 
 ### Detailed authorization
@@ -212,7 +212,7 @@ Get the full text and JSON of matching policies:
 ```rust
 use treetop_client::{AuthorizeRequest, BatchResult, Request};
 
-let response = client.authorize_detailed(&batch).await?;
+let response = client.authorization(&batch).detailed().send().await?;
 
 for result in &response {
     if let BatchResult::Success { data } = &result.result {
@@ -250,7 +250,7 @@ Uploading requires an upload token configured on both the client and the server.
 use treetop_client::{Client, UploadToken};
 
 let client = Client::builder("https://treetop.example.com")
-    .upload_token(UploadToken::new("server-generated-token"))
+    .upload_token(UploadToken::new("server-generated-token")?)
     .build()?;
 
 // Upload raw Cedar DSL
@@ -273,11 +273,11 @@ let metadata = client.upload_policies_json(cedar_dsl).await?;
 ```rust
 // With group and namespace filters
 let policies = client
-    .get_user_policies(
-        "alice",
-        &["admins".to_string(), "editors".to_string()],
-        &["MyApp".to_string()],
-    )
+    .user_policies("alice")?
+    .group("admins")?
+    .group("editors")?
+    .namespace("MyApp")?
+    .send()
     .await?;
 
 println!("Policies for {}: {}", policies.user, policies.policies.len());
@@ -287,7 +287,10 @@ for policy_json in &policies.policies {
 
 // As raw Cedar DSL text
 let raw = client
-    .get_user_policies_raw("alice", &["admins".to_string()], &[])
+    .user_policies("alice")?
+    .group("admins")?
+    .raw()
+    .send()
     .await?;
 println!("{raw}");
 ```
@@ -326,7 +329,7 @@ println!("{metrics}");
 ```rust
 use treetop_client::TreetopError;
 
-match client.authorize(&batch).await {
+match client.authorization(&batch).send().await {
     Ok(response) => {
         println!("Got {} results", response.total());
     }
@@ -349,7 +352,7 @@ match client.authorize(&batch).await {
         eprintln!("Unexpected response format: {e}");
     }
     Err(TreetopError::Configuration(msg)) => {
-        // Client misconfiguration (e.g. missing upload token)
+        // Client misconfiguration (for example, an invalid URL or TLS setup)
         eprintln!("Configuration error: {msg}");
     }
     Err(e) => {
@@ -358,21 +361,22 @@ match client.authorize(&batch).await {
 }
 ```
 
-### Upload without a token
+### Upload capability
 
-Calling `upload_policies_raw` or `upload_policies_json` without a configured
-upload token returns `TreetopError::Configuration` immediately, without making
-a network request:
+Upload methods are available only after the builder receives a validated token. A client built
+without the transition is `Client<ReadOnly>`, so attempting to call an upload method is a compile
+error rather than a runtime configuration failure:
 
 ```rust
-let client = Client::builder("http://localhost:9999").build()?;
+use treetop_client::{Client, UploadToken};
 
-match client.upload_policies_raw("permit(principal, action, resource);").await {
-    Err(TreetopError::Configuration(msg)) => {
-        assert!(msg.contains("no upload token"));
-    }
-    _ => unreachable!(),
-}
+let client = Client::builder("https://treetop.example.com")
+    .upload_token(UploadToken::new("server-generated-token")?)
+    .build()?;
+
+client
+    .upload_policies_raw("permit(principal, action, resource);")
+    .await?;
 ```
 
 ### Health check with retry

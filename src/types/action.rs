@@ -23,32 +23,36 @@ pub struct Action {
 }
 
 impl Action {
-    /// Creates a new action with no namespace.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self {
+    /// Creates a validated action with no namespace.
+    pub fn new(id: impl Into<String>) -> Result<Self, ValidationError> {
+        let action = Self {
             id: EntityId::new(id),
             namespace: Namespace::default(),
-        }
+        };
+        action.validate()?;
+        Ok(action)
     }
 
     /// Creates and validates a new action with no namespace.
+    #[deprecated(since = "0.0.2", note = "Action::new now validates its input")]
     pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
-        let action = Self::new(id);
-        action.validate()?;
-        Ok(action)
-    }
-
-    /// Sets the Cedar namespace for this action.
-    pub fn with_namespace(mut self, namespace: Vec<String>) -> Self {
-        self.namespace = Namespace::new(namespace);
-        self
+        Self::new(id)
     }
 
     /// Sets and validates the Cedar namespace for this action.
+    pub fn with_namespace(mut self, namespace: Vec<String>) -> Result<Self, ValidationError> {
+        self.namespace = Namespace::new(namespace);
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Sets and validates the Cedar namespace for this action.
+    #[deprecated(
+        since = "0.0.2",
+        note = "Action::with_namespace now validates its input"
+    )]
     pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
-        let action = self.with_namespace(namespace);
-        action.validate()?;
-        Ok(action)
+        self.with_namespace(namespace)
     }
 
     /// Returns the action entity identifier.
@@ -74,7 +78,7 @@ mod tests {
 
     #[test]
     fn action_serialization() {
-        let action = Action::new("create");
+        let action = Action::new("create").unwrap();
         let json = serde_json::to_value(&action).unwrap();
         assert_eq!(json["id"], "create");
         assert_eq!(json["namespace"], serde_json::json!([]));
@@ -82,15 +86,20 @@ mod tests {
 
     #[test]
     fn action_with_namespace() {
-        let action = Action::new("delete").with_namespace(vec!["Admin".to_string()]);
+        let action = Action::new("delete")
+            .unwrap()
+            .with_namespace(vec!["Admin".to_string()])
+            .unwrap();
         let json = serde_json::to_value(&action).unwrap();
         assert_eq!(json["namespace"], serde_json::json!(["Admin"]));
     }
 
     #[test]
     fn action_roundtrip() {
-        let action =
-            Action::new("view").with_namespace(vec!["App".to_string(), "Core".to_string()]);
+        let action = Action::new("view")
+            .unwrap()
+            .with_namespace(vec!["App".to_string(), "Core".to_string()])
+            .unwrap();
         let json = serde_json::to_value(&action).unwrap();
         let deserialized: Action = serde_json::from_value(json).unwrap();
         assert_eq!(action, deserialized);

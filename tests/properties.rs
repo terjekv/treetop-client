@@ -10,9 +10,9 @@ use treetop_client::{
 
 fn sample_request() -> Request {
     Request::new(
-        User::new("alice"),
-        Action::new("view"),
-        Resource::new("Document", "doc-1"),
+        User::new("alice").unwrap(),
+        Action::new("view").unwrap(),
+        Resource::new("Document", "doc-1").unwrap(),
     )
 }
 
@@ -115,7 +115,9 @@ proptest! {
         let depth = attr_depth(&value);
         let mut context = HashMap::new();
         context.insert("value".to_string(), value);
-        let request = AuthRequest::new(sample_request()).with_context(context);
+        let request = AuthRequest::new(sample_request())
+            .with_context(context)
+            .unwrap();
 
         let at_boundary = request.validate_context(RequestLimits {
             max_context_bytes: usize::MAX,

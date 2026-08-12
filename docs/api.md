@@ -13,23 +13,27 @@ All endpoints live under `/api/v1/` except for `/metrics`.
 | GET | `/api/v1/health` | `health()` | `{}` (empty) |
 | GET | `/api/v1/version` | `version()` | `VersionInfo` |
 | GET | `/api/v1/status` | `status()` | `StatusResponse` |
-| POST | `/api/v1/authorize?detail=brief` | `authorize()` | `AuthorizeBriefResponse` |
-| POST | `/api/v1/authorize?detail=full` | `authorize_detailed()` | `AuthorizeDetailedResponse` |
+| POST | `/api/v1/authorize?detail=brief` | `authorization().send()` / `authorize()` | `AuthorizeBriefResponse` |
+| POST | `/api/v1/authorize?detail=full` | `authorization().detailed().send()` / `authorize_detailed()` | `AuthorizeDetailedResponse` |
 | GET | `/api/v1/policies` | `get_policies()` | `PoliciesDownload` |
 | GET | `/api/v1/policies?format=raw` | `get_policies_raw()` | Plain text |
 | POST | `/api/v1/policies` | `upload_policies_raw()` / `upload_policies_json()` | `PoliciesMetadata` |
 | GET | `/api/v1/schema` | `get_schema()` | `SchemaDownload` |
 | GET | `/api/v1/schema?format=raw` | `get_schema_raw()` | Plain text |
 | POST | `/api/v1/schema` | `upload_schema_raw()` / `upload_schema_json()` | `PoliciesMetadata` |
-| GET | `/api/v1/policies/{user}` | `get_user_policies()` | `UserPolicies` |
-| GET | `/api/v1/policies/{user}?format=raw` | `get_user_policies_raw()` | Plain text |
+| GET | `/api/v1/policies/{user}` | `user_policies().send()` / `get_user_policies()` | `UserPolicies` |
+| GET | `/api/v1/policies/{user}?format=raw` | `user_policies().raw().send()` / `get_user_policies_raw()` | Plain text |
 | GET | `/metrics` | `metrics()` | Plain text (Prometheus) |
+
+Policy and schema upload methods are exposed only on `Client<CanUpload>`, which is built by adding
+a validated `UploadToken` to `ClientBuilder`. All other endpoint methods are available in both
+client capability states.
 
 ## Headers
 
 | Header | When | Purpose |
 | ------ | ---- | ------- |
-| `x-correlation-id` | Any request | Optional request tracing ID, set via `with_correlation_id()` |
+| `x-correlation-id` | Any request | Optional request tracing ID, set on a client or fluent endpoint call |
 | `X-Upload-Token` | `POST /api/v1/policies`, `POST /api/v1/schema` | Required authentication token for uploads |
 | `Content-Type` | `POST /api/v1/policies`, `POST /api/v1/schema` | `text/plain` for raw Cedar DSL or schema JSON, `application/json` for JSON-wrapped |
 
