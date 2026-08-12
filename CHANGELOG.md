@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CanUpload`; code that stores an upload-capable client with an explicit type must use
   `Client<CanUpload>`. Calling uploads on a client built without a token no longer produces a
   runtime configuration error because those methods are absent at compile time.
+- **Breaking:** `ClientBuilder::danger_allow_insecure_uploads` is now available only after
+  `upload_token`; move the insecure-upload opt-in after `.upload_token(...)` in existing builder
+  chains.
 - **Breaking:** `AuthRequest::with_id` is now a fluent setter used as
   `AuthRequest::new(request).with_id(id)?`. `AuthorizeRequest::from_auth_requests` and
   `add_request_with_id` now return `Result` and reject duplicate request IDs during construction.
