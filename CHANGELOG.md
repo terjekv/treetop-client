@@ -7,9 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add configurable 16 MiB request-body limits and automatic per-request context-limit enforcement.
+- Add `MetadataSource`, a validated crate-owned representation of the server's source endpoint.
+
 ### Changed
 
 - Require GitHub-verified signed annotated release tags before publishing.
+- **Breaking:** Change `Metadata.source` from `Option<String>` to `Option<MetadataSource>` to match
+  the v0.0.7 `{ "url": "..." }` wire shape. Use `source.as_str()` to migrate string access.
+- Authorization now rejects duplicate request IDs and verifies response ordering, IDs, counts,
+  policy versions, and allow/deny policy consistency before returning results.
+- Successful plain-text endpoints now reject invalid UTF-8 instead of replacing invalid bytes.
+- User-policy endpoint parameters are validated before transport, and path spaces are encoded as
+  `%20` rather than form-style `+`.
+
+### Fixed
+
+- Deserialize the current object-shaped policy metadata source while retaining compatibility with
+  legacy bare-string snapshots.
+- Treat a missing pre-v0.0.7 `request_context` field as unsupported instead of reporting support.
+- Drain and bound successful health bodies, cap initial response allocations, and stream request
+  serialization into bounded buffers.
+
+### Security
+
+- Redact configured upload tokens if a server reflects one in an API error response.
+- Pin every third-party GitHub Action to a full commit SHA, pin installed audit/fuzz tool versions,
+  and limit the first-release crates.io bootstrap secret to the steps that require it.
 
 ## [0.0.1] - 2026-08-10
 

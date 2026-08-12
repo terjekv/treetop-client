@@ -1,25 +1,27 @@
 //! The Treetop HTTP client.
 
+use std::io::{self, Write};
 use std::sync::Arc;
 
-use reqwest::header::HeaderValue;
+use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use reqwest::{RequestBuilder, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use url::{Host, form_urlencoded};
+use url::Host;
 
 use crate::error::{Result, TreetopError};
 use crate::token::UploadToken;
 use crate::types::{
     AuthorizeBriefResponse, AuthorizeDetailedResponse, AuthorizeRequest, BatchResult,
-    DecisionBrief, PoliciesDownload, PoliciesMetadata, Request, SchemaDownload, StatusResponse,
-    UserPolicies, VersionInfo,
+    DecisionBrief, EntityId, Namespace, PoliciesDownload, PoliciesMetadata, Request, RequestLimits,
+    SchemaDownload, StatusResponse, UserPolicies, ValidationError, VersionInfo,
 };
 
 use super::builder::ClientBuilder;
 
 const CORRELATION_HEADER: &str = "x-correlation-id";
 const ERROR_BODY_LIMIT: usize = 64 * 1024;
+const INITIAL_BODY_CAPACITY: usize = 64 * 1024;
 
 /// A normalized, credential-free HTTP(S) service base URL.
 #[derive(Debug, Clone)]
@@ -134,12 +136,34 @@ impl ResponseSizeLimit {
     }
 }
 
+/// A non-zero upper bound for serialized request bodies.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RequestSizeLimit(usize);
+
+impl RequestSizeLimit {
+    pub(super) fn new(value: usize) -> Result<Self> {
+        if value == 0 {
+            Err(TreetopError::Configuration(
+                "maximum request size must be greater than zero".to_string(),
+            ))
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    fn get(self) -> usize {
+        self.0
+    }
+}
+
 struct ClientState {
     http: reqwest::Client,
     base_url: BaseUrl,
     api_base: Url,
     upload_token: Option<UploadToken>,
+    max_request_bytes: RequestSizeLimit,
     max_response_bytes: ResponseSizeLimit,
+    request_limits: RequestLimits,
 }
 
 impl ClientState {
@@ -187,7 +211,9 @@ impl Client {
         base_url: BaseUrl,
         upload_token: Option<UploadToken>,
         correlation_id: Option<CorrelationId>,
+        max_request_bytes: RequestSizeLimit,
         max_response_bytes: ResponseSizeLimit,
+        request_limits: RequestLimits,
     ) -> Self {
         let api_base = base_url.api_base();
         Self {
@@ -196,7 +222,9 @@ impl Client {
                 base_url,
                 api_base,
                 upload_token,
+                max_request_bytes,
                 max_response_bytes,
+                request_limits,
             }),
             correlation_id,
         }
@@ -248,7 +276,8 @@ impl Client {
             .content_length()
             .and_then(|length| usize::try_from(length).ok())
             .unwrap_or_default()
-            .min(limit);
+            .min(limit)
+            .min(INITIAL_BODY_CAPACITY);
         let mut body = Vec::with_capacity(capacity);
         while let Some(chunk) = response.chunk().await.map_err(TreetopError::Transport)? {
             if chunk.len() > limit.saturating_sub(body.len()) {
@@ -280,7 +309,10 @@ impl Client {
         let message = serde_json::from_slice::<ErrorEnvelope>(&body)
             .map(|envelope| envelope.error)
             .unwrap_or_else(|_| String::from_utf8_lossy(&body).into_owned());
-        TreetopError::Api { status, message }
+        TreetopError::Api {
+            status,
+            message: self.redact_upload_token(message),
+        }
     }
 
     async fn handle_response<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
@@ -301,7 +333,7 @@ impl Client {
             let body = self
                 .read_body(resp, self.state.max_response_bytes.get())
                 .await?;
-            Ok(String::from_utf8_lossy(&body).into_owned())
+            String::from_utf8(body).map_err(|_| TreetopError::InvalidTextResponse)
         } else {
             Err(self.api_error(resp).await)
         }
@@ -330,12 +362,52 @@ impl Client {
         path: &str,
         body: &B,
     ) -> Result<T> {
+        let body = self.serialize_json_body(body)?;
         let resp = self
-            .apply_headers(self.state.http.post(self.state.endpoint(path)).json(body))
+            .apply_headers(
+                self.state
+                    .http
+                    .post(self.state.endpoint(path))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body),
+            )
             .send()
             .await
             .map_err(TreetopError::Transport)?;
         self.handle_response(resp).await
+    }
+
+    fn serialize_json_body<T: Serialize>(&self, value: &T) -> Result<Vec<u8>> {
+        let limit = self.state.max_request_bytes.get();
+        let mut writer = BoundedJsonWriter::new(limit);
+        match serde_json::to_writer(&mut writer, value) {
+            Ok(()) => Ok(writer.body),
+            Err(_) if writer.exceeded => Err(TreetopError::RequestTooLarge { limit }),
+            Err(error) => Err(TreetopError::Serialization(error)),
+        }
+    }
+
+    fn validate_raw_body(&self, content: &str) -> Result<()> {
+        let limit = self.state.max_request_bytes.get();
+        if content.len() > limit {
+            Err(TreetopError::RequestTooLarge { limit })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn upload_token(&self) -> Result<&UploadToken> {
+        self.state
+            .upload_token
+            .as_ref()
+            .ok_or_else(|| TreetopError::Configuration("no upload token configured".to_string()))
+    }
+
+    fn redact_upload_token(&self, message: String) -> String {
+        let Some(token) = &self.state.upload_token else {
+            return message;
+        };
+        token.redact_from(message)
     }
 
     // --- Public API ---
@@ -351,6 +423,11 @@ impl Client {
             .map_err(TreetopError::Transport)?;
         let status = resp.status();
         if status.is_success() {
+            self.read_body(
+                resp,
+                ERROR_BODY_LIMIT.min(self.state.max_response_bytes.get()),
+            )
+            .await?;
             Ok(())
         } else {
             Err(self.api_error(resp).await)
@@ -374,9 +451,10 @@ impl Client {
     /// Sends `POST /api/v1/authorize?detail=brief`.
     pub async fn authorize(&self, request: &AuthorizeRequest) -> Result<AuthorizeBriefResponse> {
         request.validate()?;
+        request.validate_context(self.state.request_limits)?;
         let response: AuthorizeBriefResponse =
             self.post_json("authorize?detail=brief", request).await?;
-        response.validate(request.len())?;
+        response.validate_against(request)?;
         Ok(response)
     }
 
@@ -389,9 +467,10 @@ impl Client {
         request: &AuthorizeRequest,
     ) -> Result<AuthorizeDetailedResponse> {
         request.validate()?;
+        request.validate_context(self.state.request_limits)?;
         let response: AuthorizeDetailedResponse =
             self.post_json("authorize?detail=full", request).await?;
-        response.validate(request.len())?;
+        response.validate_against(request)?;
         Ok(response)
     }
 
@@ -445,17 +524,15 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated policy metadata on success.
     pub async fn upload_policies_raw(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token =
-            self.state.upload_token.as_ref().ok_or_else(|| {
-                TreetopError::Configuration("no upload token configured".to_string())
-            })?;
+        let token = self.upload_token()?;
+        self.validate_raw_body(content)?;
 
         let resp = self
             .apply_headers(
                 self.state
                     .http
                     .post(self.state.endpoint("policies"))
-                    .header("Content-Type", "text/plain")
+                    .header(CONTENT_TYPE, "text/plain")
                     .header("X-Upload-Token", token.header_value())
                     .body(content.to_string()),
             )
@@ -473,23 +550,22 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated policy metadata on success.
     pub async fn upload_policies_json(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token =
-            self.state.upload_token.as_ref().ok_or_else(|| {
-                TreetopError::Configuration("no upload token configured".to_string())
-            })?;
+        let token = self.upload_token()?;
 
         #[derive(Serialize)]
         struct Upload<'a> {
             policies: &'a str,
         }
 
+        let body = self.serialize_json_body(&Upload { policies: content })?;
         let resp = self
             .apply_headers(
                 self.state
                     .http
                     .post(self.state.endpoint("policies"))
                     .header("X-Upload-Token", token.header_value())
-                    .json(&Upload { policies: content }),
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body),
             )
             .send()
             .await
@@ -503,17 +579,15 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated server metadata on success.
     pub async fn upload_schema_raw(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token =
-            self.state.upload_token.as_ref().ok_or_else(|| {
-                TreetopError::Configuration("no upload token configured".to_string())
-            })?;
+        let token = self.upload_token()?;
+        self.validate_raw_body(content)?;
 
         let resp = self
             .apply_headers(
                 self.state
                     .http
                     .post(self.state.endpoint("schema"))
-                    .header("Content-Type", "text/plain")
+                    .header(CONTENT_TYPE, "text/plain")
                     .header("X-Upload-Token", token.header_value())
                     .body(content.to_string()),
             )
@@ -532,23 +606,22 @@ impl Client {
     /// (see [`ClientBuilder::upload_token`]).
     /// Returns the updated server metadata on success.
     pub async fn upload_schema_json(&self, content: &str) -> Result<PoliciesMetadata> {
-        let token =
-            self.state.upload_token.as_ref().ok_or_else(|| {
-                TreetopError::Configuration("no upload token configured".to_string())
-            })?;
+        let token = self.upload_token()?;
 
         #[derive(Serialize)]
         struct Upload<'a> {
             schema: &'a str,
         }
 
+        let body = self.serialize_json_body(&Upload { schema: content })?;
         let resp = self
             .apply_headers(
                 self.state
                     .http
                     .post(self.state.endpoint("schema"))
                     .header("X-Upload-Token", token.header_value())
-                    .json(&Upload { schema: content }),
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body),
             )
             .send()
             .await
@@ -565,7 +638,7 @@ impl Client {
         groups: &[String],
         namespaces: &[String],
     ) -> Result<UserPolicies> {
-        let url = self.build_user_policies_url(user, groups, namespaces, false);
+        let url = self.build_user_policies_url(user, groups, namespaces, false)?;
         let resp = self
             .apply_headers(self.state.http.get(url))
             .send()
@@ -584,7 +657,7 @@ impl Client {
         groups: &[String],
         namespaces: &[String],
     ) -> Result<String> {
-        let url = self.build_user_policies_url(user, groups, namespaces, true);
+        let url = self.build_user_policies_url(user, groups, namespaces, true)?;
         self.get_text(url).await
     }
 
@@ -602,13 +675,30 @@ impl Client {
         groups: &[String],
         namespaces: &[String],
         raw: bool,
-    ) -> Url {
-        let encoded_user: String = form_urlencoded::byte_serialize(user.as_bytes()).collect();
+    ) -> Result<Url> {
+        let user_id = EntityId::new(user);
+        user_id.validate("user policies user")?;
+        if user.is_empty() || matches!(user, "." | "..") {
+            return Err(ValidationError::InvalidPathSegment {
+                field: "user policies user",
+                value: user.to_string(),
+            }
+            .into());
+        }
+        for group in groups {
+            EntityId::new(group).validate("user policies group")?;
+        }
+        for namespace in namespaces {
+            Namespace::new(namespace.split("::").map(str::to_string).collect())
+                .validate("user policies namespace")?;
+        }
+
+        let encoded_user = percent_encode_path_segment(user_id.as_str());
         let mut url = self
             .state
             .endpoint("policies/")
             .join(&encoded_user)
-            .expect("a form-encoded path segment must be a valid relative URL");
+            .map_err(TreetopError::InvalidUrl)?;
 
         let mut query = url.query_pairs_mut();
         for ns in namespaces {
@@ -621,7 +711,56 @@ impl Client {
             query.append_pair("format", "raw");
         }
         drop(query);
-        url
+        Ok(url)
+    }
+}
+
+fn percent_encode_path_segment(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+            encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+    encoded
+}
+
+struct BoundedJsonWriter {
+    body: Vec<u8>,
+    limit: usize,
+    exceeded: bool,
+}
+
+impl BoundedJsonWriter {
+    fn new(limit: usize) -> Self {
+        Self {
+            body: Vec::with_capacity(limit.min(INITIAL_BODY_CAPACITY)),
+            limit,
+            exceeded: false,
+        }
+    }
+}
+
+impl Write for BoundedJsonWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        if buffer.len() > self.limit.saturating_sub(self.body.len()) {
+            self.exceeded = true;
+            return Err(io::Error::other(
+                "serialized request exceeds configured limit",
+            ));
+        }
+        self.body.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 

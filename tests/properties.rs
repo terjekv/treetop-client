@@ -155,6 +155,13 @@ proptest! {
     }
 
     #[test]
+    fn reordered_response_indices_are_rejected(successes in vec(any::<bool>(), 2..64)) {
+        let mut response = valid_response(&successes);
+        response.results.swap(0, 1);
+        prop_assert!(response.validate(successes.len()).is_err());
+    }
+
+    #[test]
     fn mismatched_response_versions_are_rejected(successes in vec(Just(true), 1..64)) {
         let mut response = valid_response(&successes);
         let BatchResult::Success { data } = &mut response.results[0].result else {

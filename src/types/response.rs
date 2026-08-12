@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, TreetopError};
 
 use super::policy::PermitPolicy;
+use super::request::AuthorizeRequest;
 use super::version::PolicyVersion;
 
 /// The authorization decision: either `Allow` or `Deny`.
@@ -106,25 +107,51 @@ pub struct AuthorizeResponse<T> {
     pub failed: usize,
 }
 
-pub(crate) trait DecisionVersion {
+pub(crate) trait ValidateDecision {
     fn policy_version(&self) -> &PolicyVersion;
+
+    fn validate(&self) -> std::result::Result<(), &'static str>;
 }
 
-impl DecisionVersion for AuthorizeDecisionBrief {
+impl ValidateDecision for AuthorizeDecisionBrief {
     fn policy_version(&self) -> &PolicyVersion {
         &self.version
     }
+
+    fn validate(&self) -> std::result::Result<(), &'static str> {
+        match self.decision {
+            DecisionBrief::Allow if self.policy_id.is_empty() => {
+                Err("an Allow decision has no matching policy ID")
+            }
+            DecisionBrief::Deny if !self.policy_id.is_empty() => {
+                Err("a Deny decision contains matching policy IDs")
+            }
+            DecisionBrief::Allow | DecisionBrief::Deny => Ok(()),
+        }
+    }
 }
 
-impl DecisionVersion for AuthorizeDecisionDetailed {
+impl ValidateDecision for AuthorizeDecisionDetailed {
     fn policy_version(&self) -> &PolicyVersion {
         &self.version
+    }
+
+    fn validate(&self) -> std::result::Result<(), &'static str> {
+        match self.decision {
+            DecisionBrief::Allow if self.policy.is_empty() => {
+                Err("an Allow decision has no matching policies")
+            }
+            DecisionBrief::Deny if !self.policy.is_empty() => {
+                Err("a Deny decision contains matching policies")
+            }
+            DecisionBrief::Allow | DecisionBrief::Deny => Ok(()),
+        }
     }
 }
 
 fn validate_response<T>(response: &AuthorizeResponse<T>, expected_results: usize) -> Result<()>
 where
-    T: DecisionVersion,
+    T: ValidateDecision,
 {
     if response.results.len() != expected_results {
         return Err(TreetopError::InvalidResponse(format!(
@@ -146,21 +173,13 @@ where
         )));
     }
 
-    let mut seen = vec![false; expected_results];
-    for result in &response.results {
-        let Some(slot) = seen.get_mut(result.index) else {
+    for (position, result) in response.results.iter().enumerate() {
+        if result.index != position {
             return Err(TreetopError::InvalidResponse(format!(
-                "authorize result index {} is out of range",
-                result.index
-            )));
-        };
-        if *slot {
-            return Err(TreetopError::InvalidResponse(format!(
-                "authorize result index {} is duplicated",
-                result.index
+                "authorize result at position {position} reports index {}; results must remain in request order",
+                result.index,
             )));
         }
-        *slot = true;
 
         if let BatchResult::Success { data } = &result.result {
             if data.policy_version() != &response.version {
@@ -169,6 +188,33 @@ where
                     result.index
                 )));
             }
+            if let Err(message) = data.validate() {
+                return Err(TreetopError::InvalidResponse(format!(
+                    "authorize result index {} is inconsistent: {message}",
+                    result.index
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_response_against<T>(
+    response: &AuthorizeResponse<T>,
+    request: &AuthorizeRequest,
+) -> Result<()>
+where
+    T: ValidateDecision,
+{
+    validate_response(response, request.len())?;
+    for (result, submitted) in response.results.iter().zip(request.requests()) {
+        if result.id.as_deref() != submitted.id() {
+            return Err(TreetopError::InvalidResponse(format!(
+                "authorize result index {} reports correlation ID {:?}, expected {:?}",
+                result.index,
+                result.id.as_deref(),
+                submitted.id()
+            )));
         }
     }
     Ok(())
@@ -177,20 +223,28 @@ where
 impl AuthorizeResponse<AuthorizeDecisionBrief> {
     /// Validates structural integrity against the number of submitted requests.
     ///
-    /// This checks result count, declared success/failure counts, result indices,
-    /// and per-result policy versions.
+    /// This checks result count, declared success/failure counts, batch order, decision
+    /// consistency, and per-result policy versions.
     pub fn validate(&self, expected_results: usize) -> Result<()> {
         validate_response(self, expected_results)
+    }
+
+    pub(crate) fn validate_against(&self, request: &AuthorizeRequest) -> Result<()> {
+        validate_response_against(self, request)
     }
 }
 
 impl AuthorizeResponse<AuthorizeDecisionDetailed> {
     /// Validates structural integrity against the number of submitted requests.
     ///
-    /// This checks result count, declared success/failure counts, result indices,
-    /// and per-result policy versions.
+    /// This checks result count, declared success/failure counts, batch order, decision
+    /// consistency, and per-result policy versions.
     pub fn validate(&self, expected_results: usize) -> Result<()> {
         validate_response(self, expected_results)
+    }
+
+    pub(crate) fn validate_against(&self, request: &AuthorizeRequest) -> Result<()> {
+        validate_response_against(self, request)
     }
 }
 
@@ -310,5 +364,30 @@ mod tests {
             BatchResult::Failed { message } => assert_eq!(message, "invalid principal"),
             _ => panic!("expected failure"),
         }
+    }
+
+    #[test]
+    fn denied_response_cannot_report_matching_policy_ids() {
+        let json = serde_json::json!({
+            "results": [{
+                "index": 0,
+                "status": "success",
+                "result": {
+                    "decision": "Deny",
+                    "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+                    "policy_id": "policy1"
+                }
+            }],
+            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+            "successful": 1,
+            "failed": 0
+        });
+        let response: AuthorizeBriefResponse = serde_json::from_value(json).unwrap();
+
+        assert!(matches!(
+            response.validate(1),
+            Err(TreetopError::InvalidResponse(message))
+                if message.contains("Deny decision contains matching policy IDs")
+        ));
     }
 }

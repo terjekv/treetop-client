@@ -22,8 +22,9 @@ pub use response::{
     AuthorizeDetailedResponse, AuthorizeResponse, BatchResult, DecisionBrief, IndexedResult,
 };
 pub use status::{
-    Metadata, PoliciesMetadata, RequestContextFallbackReason, RequestContextStatus, RequestLimits,
-    StatusResponse,
+    Metadata, MetadataSource, PoliciesMetadata, RequestContextFallbackReason, RequestContextStatus,
+    RequestLimits, StatusResponse,
 };
 pub use validation::{CedarIpAddr, ValidationError};
+pub(crate) use validation::{EntityId, Namespace};
 pub use version::{Core, PolicyVersion, VersionInfo};

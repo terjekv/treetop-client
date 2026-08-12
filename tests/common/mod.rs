@@ -1,5 +1,8 @@
 #![cfg(feature = "server-tests")]
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "each server-test binary imports a different subset of this shared harness"
+)]
 
 use std::process::Command;
 use std::sync::{Mutex, Once};

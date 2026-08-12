@@ -18,11 +18,20 @@ pub enum TreetopError {
     /// The `status` field contains the HTTP status code (e.g. 400, 403, 500),
     /// and `message` contains the server's error description.
     #[error("API error (HTTP {status}): {message}")]
-    Api { status: StatusCode, message: String },
+    Api {
+        /// HTTP status returned by the server.
+        status: StatusCode,
+        /// Server-provided error description, with configured credentials redacted.
+        message: String,
+    },
 
     /// Failed to deserialize the response body from the server.
     #[error("Response deserialization error: {0}")]
     Deserialization(#[from] serde_json::Error),
+
+    /// Failed to serialize a request body before transport.
+    #[error("Request serialization error: {0}")]
+    Serialization(#[source] serde_json::Error),
 
     /// A request value violates a local Treetop or Cedar invariant.
     #[error("Request validation error: {0}")]
@@ -38,7 +47,21 @@ pub enum TreetopError {
 
     /// A successful response body exceeded the configured safety limit.
     #[error("Response body exceeds the configured limit of {limit} bytes")]
-    ResponseTooLarge { limit: usize },
+    ResponseTooLarge {
+        /// Configured maximum number of response-body bytes.
+        limit: usize,
+    },
+
+    /// A request body exceeded the configured safety limit before transport.
+    #[error("Request body exceeds the configured limit of {limit} bytes")]
+    RequestTooLarge {
+        /// Configured maximum number of request-body bytes.
+        limit: usize,
+    },
+
+    /// A successful plain-text response was not valid UTF-8.
+    #[error("Successful text response is not valid UTF-8")]
+    InvalidTextResponse,
 
     /// The server returned a structurally inconsistent successful response.
     #[error("Invalid API response: {0}")]

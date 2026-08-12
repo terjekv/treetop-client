@@ -1,6 +1,7 @@
 //! Authorization request types.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::{self, Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -180,15 +181,16 @@ impl AuthRequest {
             });
         }
 
-        let bytes = serde_json::to_vec(context)
-            .map_err(|error| ValidationError::ContextSerialization {
+        let mut counter = ByteCounter::new(limits.max_context_bytes);
+        if let Err(error) = serde_json::to_writer(&mut counter, context) {
+            if counter.exceeded {
+                return Err(ValidationError::ContextTooLarge {
+                    actual: counter.bytes,
+                    limit: limits.max_context_bytes,
+                });
+            }
+            return Err(ValidationError::ContextSerialization {
                 message: error.to_string(),
-            })?
-            .len();
-        if bytes > limits.max_context_bytes {
-            return Err(ValidationError::ContextTooLarge {
-                actual: bytes,
-                limit: limits.max_context_bytes,
             });
         }
         Ok(())
@@ -291,8 +293,16 @@ impl AuthorizeRequest {
     ///
     /// Empty batches are valid and produce an empty response on compatible servers.
     pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut request_ids = HashSet::new();
         for request in &self.requests {
             request.validate()?;
+            if let Some(id) = request.id() {
+                if !request_ids.insert(id) {
+                    return Err(ValidationError::DuplicateRequestId {
+                        value: id.to_string(),
+                    });
+                }
+            }
         }
         Ok(())
     }
@@ -318,6 +328,39 @@ fn context_value_depth(value: &AttrValue) -> usize {
     }
 
     maximum
+}
+
+struct ByteCounter {
+    bytes: usize,
+    limit: usize,
+    exceeded: bool,
+}
+
+impl ByteCounter {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: 0,
+            limit,
+            exceeded: false,
+        }
+    }
+}
+
+impl Write for ByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(buffer.len());
+        if self.bytes > self.limit {
+            self.exceeded = true;
+            return Err(io::Error::other(
+                "serialized context exceeds configured limit",
+            ));
+        }
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -389,6 +432,18 @@ mod tests {
     fn authorize_request_single() {
         let req = AuthorizeRequest::single(sample_request());
         assert_eq!(req.requests().len(), 1);
+    }
+
+    #[test]
+    fn authorize_request_rejects_duplicate_ids() {
+        let request = AuthorizeRequest::new()
+            .add_request_with_id("duplicate", sample_request())
+            .add_request_with_id("duplicate", sample_request());
+
+        assert!(matches!(
+            request.validate(),
+            Err(ValidationError::DuplicateRequestId { value }) if value == "duplicate"
+        ));
     }
 
     #[test]

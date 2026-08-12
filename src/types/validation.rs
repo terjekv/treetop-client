@@ -55,6 +55,22 @@ pub enum ValidationError {
     #[error("invalid request correlation ID")]
     InvalidRequestId,
 
+    /// A batch contains the same request correlation ID more than once.
+    #[error("request correlation ID is duplicated in the batch: {value:?}")]
+    DuplicateRequestId {
+        /// The duplicated correlation ID.
+        value: String,
+    },
+
+    /// A value cannot be represented as one path segment without changing endpoint semantics.
+    #[error("{field} is not a valid endpoint path segment: {value:?}")]
+    InvalidPathSegment {
+        /// The endpoint parameter containing the invalid value.
+        field: &'static str,
+        /// The invalid path-segment value.
+        value: String,
+    },
+
     /// An upload token is empty or cannot be represented as an HTTP header value.
     #[error("upload token must be non-empty and contain only valid HTTP header characters")]
     InvalidUploadToken,

@@ -22,6 +22,7 @@ All endpoints live under `/api/v1/` except for `/metrics`.
 | GET | `/api/v1/schema?format=raw` | `get_schema_raw()` | Plain text |
 | POST | `/api/v1/schema` | `upload_schema_raw()` / `upload_schema_json()` | `PoliciesMetadata` |
 | GET | `/api/v1/policies/{user}` | `get_user_policies()` | `UserPolicies` |
+| GET | `/api/v1/policies/{user}?format=raw` | `get_user_policies_raw()` | Plain text |
 | GET | `/metrics` | `metrics()` | Plain text (Prometheus) |
 
 ## Headers
@@ -50,11 +51,14 @@ HTTP status codes:
 
 Mapped to `TreetopError::Api { status, message }` in the client. A failed item inside a successful
 batch response is exposed as `TreetopError::Evaluation` by `is_allowed()`. Local request failures,
-oversized responses, and inconsistent successful responses use `Validation`, `ResponseTooLarge`,
-and `InvalidResponse`, respectively.
+oversized requests, oversized responses, invalid UTF-8 text, and inconsistent successful responses
+use `Validation`/`RequestTooLarge`, `ResponseTooLarge`, `InvalidTextResponse`, and
+`InvalidResponse`, respectively. Server error messages are bounded and any configured upload token
+is redacted before an `Api` error is returned.
 
-The default client buffers at most 16 MiB for a successful body and 64 KiB for an error body.
-Configure the successful-body limit with `ClientBuilder::max_response_bytes()`.
+The default client buffers at most 16 MiB for a request or successful body and 64 KiB for an error
+or successful health body. Configure the request and successful-response limits with
+`ClientBuilder::max_request_bytes()` and `ClientBuilder::max_response_bytes()`.
 
 ## Type reference
 
@@ -198,7 +202,9 @@ The `id` field is optional on each request. Requests without an `id` will not
 have an `id` field in the corresponding response result.
 
 The `context` field is optional on each request. When present, its values use the
-same `AttrValue` encoding as resource attributes.
+same `AttrValue` encoding as resource attributes. Request IDs must be unique within a batch.
+Context key count, nesting depth, and serialized size are validated before transport using the
+limits configured on `ClientBuilder`.
 
 ### AuthorizeBriefResponse
 
@@ -254,7 +260,10 @@ Each result is tagged with `"status": "success"` or `"status": "failed"`:
   and `version`.
 - **Failed**: contains an `error` string describing the evaluation failure.
 
-The `id` field is only present if the corresponding request had one.
+The `id` field is only present if the corresponding request had one. The client verifies that
+results remain in request order and that each index and correlation ID matches its request. It also
+checks declared counts, policy versions, and that allowed decisions have matching permit policies
+while denied decisions do not.
 
 ### AuthorizeDetailedResponse
 
@@ -356,7 +365,7 @@ Response from `GET /api/v1/status`:
       "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "c82d1168...",
       "size": 2049,
-      "source": "https://example.com/policies.cedar",
+      "source": { "url": "https://example.com/policies.cedar" },
       "refresh_frequency": 300,
       "entries": 42,
       "content": "permit(...);\nforbid(...);"
@@ -367,20 +376,35 @@ Response from `GET /api/v1/status`:
       "size": 512,
       "entries": 10,
       "content": "..."
-    }
+    },
+    "schema_validation_mode": "permissive",
+    "schema": null
   },
   "parallel_configuration": {
     "cpu_count": 8,
     "worker_threads": 4,
     "parallel_cutoff": 5
+  },
+  "request_limits": {
+    "max_context_bytes": 16384,
+    "max_context_depth": 8,
+    "max_context_keys": 64
+  },
+  "request_context": {
+    "supported": true,
+    "schema_backed": false,
+    "fallback_reason": "no_schema"
   }
 }
 ```
 
 The `source` and `refresh_frequency` fields are optional (omitted when policies
-were loaded from a file rather than a URL). The `parallel_configuration` field
-is represented as opaque JSON (`serde_json::Value`) since its shape may vary
-between server versions.
+were loaded from a file rather than a URL). `source` is a `MetadataSource` endpoint object; its URL
+is available through `MetadataSource::as_str()`. The client also accepts the legacy bare-string
+snapshot representation while serializing the canonical endpoint object. The
+`parallel_configuration` field is represented as opaque JSON (`serde_json::Value`) since its shape
+may vary between server versions. Servers before v0.0.7 omit `request_limits` and
+`request_context`; omitted context support safely defaults to unsupported.
 
 ### Metadata
 
@@ -391,7 +415,7 @@ Appears within `StatusResponse` and `PoliciesDownload`:
   "timestamp": "2025-12-19T00:14:38.577289000Z",
   "sha256": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
   "size": 2049,
-  "source": "https://example.com/policies.cedar",
+  "source": { "url": "https://example.com/policies.cedar" },
   "refresh_frequency": 300,
   "entries": 42,
   "content": "permit(...);"
@@ -429,6 +453,8 @@ Response from `GET /api/v1/policies/{user}`:
 ```
 
 The `policies` array contains each matching policy in Cedar JSON format.
+The optional `matches` array contains the corresponding Cedar policy ID and match reasons; it
+defaults to an empty array for older supported servers.
 
 ### PoliciesMetadata
 
@@ -475,3 +501,7 @@ Response from `POST /api/v1/policies` (successful upload):
 | `namespaces[]` | string (repeatable) | Filter policies by Cedar namespace. |
 | `groups[]` | string (repeatable) | Include group memberships for policy matching. |
 | `format` | `raw`, `text`, (omit) | Return plain text instead of JSON. |
+
+The client percent-encodes `user` as one path segment and validates the user, group, and namespace
+filters before transport. Namespace values use qualified Cedar identifier syntax such as
+`App::Documents`.

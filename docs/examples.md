@@ -447,6 +447,9 @@ let client = Client::builder("https://treetop.example.com")
     .connect_timeout(Duration::from_secs(3))
     // Overall request timeout including response body (default: 30s)
     .request_timeout(Duration::from_secs(10))
+    // Bound serialized requests and buffered successful responses (defaults: 16 MiB each)
+    .max_request_bytes(8 * 1024 * 1024)
+    .max_response_bytes(8 * 1024 * 1024)
     .build()?;
 ```
 

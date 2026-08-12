@@ -244,7 +244,21 @@ async fn authorize_with_context_sends_context() {
         .and(path("/api/v1/authorize"))
         .and(query_param("detail", "brief"))
         .and(body_json(&expected_body))
-        .respond_with(ResponseTemplate::new(200).set_body_json(brief_response("Allow", "p1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "results": [{
+                "index": 0,
+                "id": "ctx-1",
+                "status": "success",
+                "result": {
+                    "decision": "Allow",
+                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+                    "policy_id": "p1"
+                }
+            }],
+            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+            "successful": 1,
+            "failed": 0
+        })))
         .mount(&server)
         .await;
 
@@ -688,7 +702,7 @@ async fn user_policies_with_empty_groups_and_namespaces() {
 
 #[rstest]
 #[case::at_sign("alice@example.com", "/api/v1/policies/alice%40example.com", &[], &[])]
-#[case::space("alice doe", "/api/v1/policies/alice+doe", &[], &[])]
+#[case::space("alice doe", "/api/v1/policies/alice%20doe", &[], &[])]
 #[tokio::test]
 async fn user_policies_encodes_user_in_path(
     #[case] user: &str,
@@ -715,7 +729,7 @@ async fn user_policies_encodes_user_in_path(
 }
 
 #[rstest]
-#[case::unicode_namespace("alice", "namespaces[]", "Caf\u{00e9}", &[], &["Caf\u{00e9}".to_string()])]
+#[case::qualified_namespace("alice", "namespaces[]", "App::Documents", &[], &["App::Documents".to_string()])]
 #[case::ampersand_group("bob", "groups[]", "r&d", &["r&d".to_string()], &[])]
 #[tokio::test]
 async fn user_policies_encodes_query_params(
@@ -1202,7 +1216,7 @@ async fn detailed_response_with_no_annotation_id() {
                         "json": {"effect": "permit"},
                         "cedar_id": "policy0"
                     }],
-                    "decision": "Deny",
+                    "decision": "Allow",
                     "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" }
                 }
             }],
@@ -1223,7 +1237,7 @@ async fn detailed_response_with_no_annotation_id() {
         BatchResult::Success { data } => {
             assert!(data.policy[0].annotation_id.is_none());
             assert_eq!(data.policy[0].cedar_id, "policy0");
-            assert_eq!(data.decision, DecisionBrief::Deny);
+            assert_eq!(data.decision, DecisionBrief::Allow);
         }
         _ => panic!("expected success"),
     }
