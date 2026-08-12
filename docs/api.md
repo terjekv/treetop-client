@@ -4,12 +4,16 @@ This document describes the exact JSON wire format for all request and response
 types exchanged between `treetop-client` and a Treetop REST server. Use this as
 a reference when debugging or building interoperable clients.
 
-All endpoints live under `/api/v1/` except for `/metrics`.
+Application endpoints live under `/api/v1/`. Operational endpoints live at `/livez`, `/readyz`,
+`/openapi.json`, and `/metrics`.
 
 ## Endpoints summary
 
 | Method | Path | Client method | Response type |
 | ------ | ---- | ------------- | ------------- |
+| GET | `/livez` | `livez()` | Plain text (discarded after validation) |
+| GET | `/readyz` | `readyz()` | `bool` from HTTP 200/503 |
+| GET | `/openapi.json` | `openapi()` | `serde_json::Value` |
 | GET | `/api/v1/health` | `health()` | `{}` (empty) |
 | GET | `/api/v1/version` | `version()` | `VersionInfo` |
 | GET | `/api/v1/status` | `status()` | `StatusResponse` |
@@ -52,6 +56,7 @@ HTTP status codes:
 - **400** -- invalid payload, invalid Cedar DSL, validation errors
 - **403** -- upload not allowed, invalid or missing upload token
 - **500** -- internal server error (lock poisoning, evaluation failure)
+- **503** -- `/readyz` reports not-ready as `Ok(false)`; unexpected 503 responses are API errors
 
 Mapped to `TreetopError::Api { status, message }` in the client. A failed item inside a successful
 batch response is exposed as `TreetopError::Evaluation` by `is_allowed()`. Local request failures,
@@ -60,8 +65,9 @@ use `Validation`/`RequestTooLarge`, `ResponseTooLarge`, `InvalidTextResponse`, a
 `InvalidResponse`, respectively. Server error messages are bounded and any configured upload token
 is redacted before an `Api` error is returned.
 
-The default client buffers at most 16 MiB for a request or successful body and 64 KiB for an error
-or successful health body. Configure the request and successful-response limits with
+The default client buffers at most 16 MiB for a request or successful body and 64 KiB for an error.
+Successful health and operational-probe bodies are drained and bounded; `/livez` and `/readyz`
+also require valid UTF-8. Configure the request and successful-response limits with
 `ClientBuilder::max_request_bytes()` and `ClientBuilder::max_response_bytes()`.
 
 ## Type reference
@@ -390,6 +396,7 @@ Response from `GET /api/v1/status`:
     "parallel_cutoff": 5
   },
   "request_limits": {
+    "max_batch_size": 1024,
     "max_context_bytes": 16384,
     "max_context_depth": 8,
     "max_context_keys": 64
@@ -408,7 +415,8 @@ is available through `MetadataSource::as_str()`. The client also accepts the leg
 snapshot representation while serializing the canonical endpoint object. The
 `parallel_configuration` field is represented as opaque JSON (`serde_json::Value`) since its shape
 may vary between server versions. Servers before v0.0.7 omit `request_limits` and
-`request_context`; omitted context support safely defaults to unsupported.
+`request_context`; omitted context support safely defaults to unsupported. An omitted
+`max_batch_size` is represented as `None` for legacy servers with unlimited batches.
 
 ### Metadata
 

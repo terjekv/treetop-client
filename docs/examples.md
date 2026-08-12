@@ -317,6 +317,14 @@ if let Some(freq) = pc.policies.refresh_frequency {
     println!("Refresh every {freq}s");
 }
 
+// Canonical liveness and readiness probes
+client.livez().await?;
+println!("Ready: {}", client.readyz().await?);
+
+// Generated OpenAPI document
+let openapi = client.openapi().await?;
+println!("OpenAPI: {}", openapi["openapi"]);
+
 // Prometheus metrics
 let metrics = client.metrics().await?;
 println!("{metrics}");
@@ -379,22 +387,27 @@ client
     .await?;
 ```
 
-### Health check with retry
+### Readiness check with retry
 
 ```rust
 use std::time::Duration;
 
 async fn wait_for_server(client: &treetop_client::Client) -> treetop_client::Result<()> {
     for attempt in 1..=10 {
-        match client.health().await {
-            Ok(()) => return Ok(()),
+        match client.readyz().await {
+            Ok(true) => return Ok(()),
+            Ok(false) => {
+                eprintln!("Readiness check attempt {attempt}/10: not ready");
+            }
             Err(e) => {
-                eprintln!("Health check attempt {attempt}/10 failed: {e}");
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                eprintln!("Readiness check attempt {attempt}/10 failed: {e}");
             }
         }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    client.health().await
+    Err(treetop_client::TreetopError::InvalidResponse(
+        "server did not become ready".to_string(),
+    ))
 }
 ```
 

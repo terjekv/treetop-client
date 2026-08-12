@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
-use reqwest::{RequestBuilder, Url};
+use reqwest::{RequestBuilder, StatusCode, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use url::Host;
@@ -371,13 +371,17 @@ impl<Capability> Client<Capability> {
     async fn handle_text_response(&self, resp: reqwest::Response) -> Result<String> {
         let status = resp.status();
         if status.is_success() {
-            let body = self
-                .read_body(resp, self.state.max_response_bytes.get())
-                .await?;
-            String::from_utf8(body).map_err(|_| TreetopError::InvalidTextResponse)
+            self.read_text_body(resp).await
         } else {
             Err(self.api_error(resp).await)
         }
+    }
+
+    async fn read_text_body(&self, resp: reqwest::Response) -> Result<String> {
+        let body = self
+            .read_body(resp, self.state.max_response_bytes.get())
+            .await?;
+        String::from_utf8(body).map_err(|_| TreetopError::InvalidTextResponse)
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -476,6 +480,59 @@ impl<Capability> Client<Capability> {
         } else {
             Err(self.api_error(resp).await)
         }
+    }
+
+    /// Checks process liveness through the canonical `GET /livez` operational probe.
+    ///
+    /// Returns `Ok(())` after a successful, bounded UTF-8 response. Unlike
+    /// [`health`](Self::health), this probe is independent of server configuration state.
+    pub async fn livez(&self) -> Result<()> {
+        self.get_text(self.state.base_url.root_endpoint("livez"))
+            .await
+            .map(drop)
+    }
+
+    /// Checks whether the server is ready to accept traffic through `GET /readyz`.
+    ///
+    /// HTTP 200 maps to `Ok(true)` and HTTP 503 maps to `Ok(false)`. Both expected
+    /// responses are drained through the configured response-size and UTF-8 checks;
+    /// every other failure is returned as a [`TreetopError`].
+    pub async fn readyz(&self) -> Result<bool> {
+        let resp = self
+            .apply_headers(
+                self.state
+                    .http
+                    .get(self.state.base_url.root_endpoint("readyz")),
+            )
+            .send()
+            .await
+            .map_err(TreetopError::Transport)?;
+
+        match resp.status() {
+            StatusCode::OK => {
+                self.read_text_body(resp).await?;
+                Ok(true)
+            }
+            StatusCode::SERVICE_UNAVAILABLE => {
+                self.read_text_body(resp).await?;
+                Ok(false)
+            }
+            _ => Err(self.api_error(resp).await),
+        }
+    }
+
+    /// Returns the server-generated OpenAPI document from `GET /openapi.json`.
+    pub async fn openapi(&self) -> Result<serde_json::Value> {
+        let resp = self
+            .apply_headers(
+                self.state
+                    .http
+                    .get(self.state.base_url.root_endpoint("openapi.json")),
+            )
+            .send()
+            .await
+            .map_err(TreetopError::Transport)?;
+        self.handle_response(resp).await
     }
 
     /// Returns server and Cedar engine version information from `GET /api/v1/version`.

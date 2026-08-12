@@ -126,6 +126,9 @@ pub struct PoliciesMetadata {
 /// Server-enforced limits on authorization request context values.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RequestLimits {
+    /// Maximum requests accepted in one authorization batch, when reported by the server.
+    #[serde(default)]
+    pub max_batch_size: Option<usize>,
     /// Maximum total size in bytes for context values in a single request.
     pub max_context_bytes: usize,
     /// Maximum nesting depth for context values.
@@ -137,6 +140,7 @@ pub struct RequestLimits {
 impl Default for RequestLimits {
     fn default() -> Self {
         Self {
+            max_batch_size: None,
             max_context_bytes: 16 * 1024,
             max_context_depth: 8,
             max_context_keys: 64,
@@ -228,6 +232,7 @@ mod tests {
                 "allow_parallel": true
             },
             "request_limits": {
+                "max_batch_size": 1024,
                 "max_context_bytes": 16384,
                 "max_context_depth": 8,
                 "max_context_keys": 64
@@ -247,6 +252,7 @@ mod tests {
         );
         assert_eq!(status.policy_configuration.policies.entries, 5);
         assert!(status.policy_configuration.schema.is_some());
+        assert_eq!(status.request_limits.max_batch_size, Some(1024));
         assert_eq!(status.request_limits.max_context_bytes, 16384);
         assert!(status.request_context.supported);
         assert!(!status.request_context.schema_backed);
@@ -290,6 +296,7 @@ mod tests {
     #[test]
     fn request_limits_default() {
         let limits = RequestLimits::default();
+        assert_eq!(limits.max_batch_size, None);
         assert_eq!(limits.max_context_bytes, 16 * 1024);
         assert_eq!(limits.max_context_depth, 8);
         assert_eq!(limits.max_context_keys, 64);

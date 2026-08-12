@@ -54,6 +54,7 @@ fuzz_target!(|data: &[u8]| {
     .with_context(context)
     .unwrap();
     let limits = RequestLimits {
+        max_batch_size: None,
         max_context_bytes: usize::from(take_byte(data, &mut cursor)) * 128,
         max_context_depth: usize::from(take_byte(data, &mut cursor) % 40),
         max_context_keys: usize::from(take_byte(data, &mut cursor) % 40),
