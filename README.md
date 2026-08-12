@@ -8,7 +8,10 @@ Treetop is a Cedar-based policy evaluation service. This client provides a typed
 
 `treetop-client` is pre-1.0; API compatibility is not guaranteed between `0.0.x` releases.
 
-This version targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.7). CI verifies the stable health, version, policy, and authorization contract against v0.0.4, v0.0.5, v0.0.6, and v0.0.7; v0.0.7 receives the complete endpoint suite. Newer response fields use `#[serde(default)]` for backward compatibility.
+This version targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.10).
+CI verifies the stable health, version, policy, and authorization contract against v0.0.4 through
+v0.0.10; v0.0.10 receives the complete endpoint suite. Newer response fields use
+`#[serde(default)]` for backward compatibility.
 
 ## Features
 
@@ -23,6 +26,7 @@ This version targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-re
 - **Batch authorization** -- evaluate multiple authorization requests in a single API call
 - **Correlation IDs** -- clone-with-override pattern for request tracing without shared mutable state
 - **Schema management** -- download and upload Cedar schema data alongside policies
+- **Operational endpoints** -- typed liveness/readiness checks and access to the generated OpenAPI document
 
 ## Installation
 
@@ -30,7 +34,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-treetop-client = "0.0.1"
+treetop-client = "0.0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -267,10 +271,22 @@ if let Some(source) = &status.policy_configuration.policies.source {
 }
 ```
 
+The canonical operational probes and generated OpenAPI document are available directly:
+
+```rust
+client.livez().await?;
+if client.readyz().await? {
+    println!("Server is ready");
+}
+
+let openapi = client.openapi().await?;
+println!("OpenAPI version: {}", openapi["openapi"]);
+```
+
 ### Request context
 
 Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by
-`treetop-rest v0.0.7`. The client automatically enforces `RequestLimits::default()` before
+`treetop-rest v0.0.10`. The client automatically enforces `RequestLimits::default()` before
 transport; configure limits reported by a differently configured server with
 `ClientBuilder::request_limits()`.
 
@@ -324,4 +340,4 @@ MIT
 ## Releasing
 
 Stable tags drive the crates.io and GitHub release workflow. See
-[RELEASING.md](RELEASING.md) for the one-time `v0.0.1` bootstrap and subsequent OIDC releases.
+[RELEASING.md](RELEASING.md) for the release process.

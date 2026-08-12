@@ -137,6 +137,7 @@ fn context_validation_uses_reported_server_limits() {
 
     let error = request
         .validate_context(RequestLimits {
+            max_batch_size: None,
             max_context_bytes: usize::MAX,
             max_context_depth: usize::MAX,
             max_context_keys: 1,
@@ -158,6 +159,7 @@ fn context_validation_checks_size_and_depth() {
 
     let size_error = request
         .validate_context(RequestLimits {
+            max_batch_size: None,
             max_context_bytes: 1,
             max_context_depth: usize::MAX,
             max_context_keys: usize::MAX,
@@ -170,6 +172,7 @@ fn context_validation_checks_size_and_depth() {
 
     let depth_error = request
         .validate_context(RequestLimits {
+            max_batch_size: None,
             max_context_bytes: usize::MAX,
             max_context_depth: 2,
             max_context_keys: usize::MAX,
@@ -319,6 +322,78 @@ async fn successful_text_responses_require_utf8() {
 }
 
 #[tokio::test]
+async fn operational_probe_responses_are_bounded_and_require_utf8() {
+    let server = MockServer::start().await;
+    let client = Client::builder(server.uri())
+        .max_response_bytes(4)
+        .build()
+        .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/readyz"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("12345"))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        client.readyz().await,
+        Err(TreetopError::ResponseTooLarge { limit: 4 })
+    ));
+
+    let server = MockServer::start().await;
+    let client = Client::builder(server.uri()).build().unwrap();
+    Mock::given(method("GET"))
+        .and(path("/livez"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xff]))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        client.livez().await,
+        Err(TreetopError::InvalidTextResponse)
+    ));
+}
+
+#[tokio::test]
+async fn openapi_responses_are_bounded() {
+    let server = MockServer::start().await;
+    let client = Client::builder(server.uri())
+        .max_response_bytes(4)
+        .build()
+        .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/openapi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("12345"))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        client.openapi().await,
+        Err(TreetopError::ResponseTooLarge { limit: 4 })
+    ));
+}
+
+#[tokio::test]
+async fn operational_endpoint_errors_redact_upload_tokens() {
+    let server = MockServer::start().await;
+    let token = "do-not-leak-this-token";
+    let client = Client::builder(server.uri())
+        .upload_token(UploadToken::new(token).unwrap())
+        .build()
+        .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/livez"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+            "error": format!("reflected credential: {token}")
+        })))
+        .mount(&server)
+        .await;
+
+    let error = client.livez().await.unwrap_err();
+    assert!(!error.to_string().contains(token));
+    assert!(error.to_string().contains("[REDACTED]"));
+}
+
+#[tokio::test]
 async fn authorization_requests_are_bounded_before_transport() {
     let client = Client::builder("http://localhost")
         .max_request_bytes(16)
@@ -355,6 +430,7 @@ async fn upload_bodies_are_bounded_before_transport() {
 async fn request_context_limits_are_enforced_before_transport() {
     let client = Client::builder("http://localhost")
         .request_limits(RequestLimits {
+            max_batch_size: None,
             max_context_bytes: usize::MAX,
             max_context_depth: usize::MAX,
             max_context_keys: 0,

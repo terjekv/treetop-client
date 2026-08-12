@@ -96,6 +96,69 @@ async fn health_returns_error_on_500() {
     }
 }
 
+#[tokio::test]
+async fn livez_returns_ok_on_200() {
+    let (server, client) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/livez"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok\n"))
+        .mount(&server)
+        .await;
+
+    client.livez().await.unwrap();
+}
+
+#[rstest]
+#[case::ready(200, true, "ok\n")]
+#[case::not_ready(503, false, "not ready\n")]
+#[tokio::test]
+async fn readyz_maps_expected_statuses(
+    #[case] status: u16,
+    #[case] expected: bool,
+    #[case] body: &str,
+) {
+    let (server, client) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/readyz"))
+        .respond_with(ResponseTemplate::new(status).set_body_string(body))
+        .mount(&server)
+        .await;
+
+    assert_eq!(client.readyz().await.unwrap(), expected);
+}
+
+#[tokio::test]
+async fn readyz_returns_error_on_unexpected_status() {
+    let (server, client) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/readyz"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({"error": "down"})))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(
+        client.readyz().await,
+        Err(TreetopError::Api { status, .. }) if status.as_u16() == 500
+    ));
+}
+
+#[tokio::test]
+async fn openapi_returns_json_document() {
+    let (server, client) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/openapi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Treetop REST API", "version": "0.0.10"}
+        })))
+        .mount(&server)
+        .await;
+
+    let document = client.openapi().await.unwrap();
+    assert_eq!(document["openapi"], "3.1.0");
+    assert_eq!(document["info"]["version"], "0.0.10");
+}
+
 // ==========================================================================
 // Version
 // ==========================================================================

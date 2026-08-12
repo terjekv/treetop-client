@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-08-12
+
+Targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.10).
+
 ### Added
 
 - Add configurable 16 MiB request-body limits and automatic per-request context-limit enforcement.
@@ -17,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correlation IDs.
 - Add `Client::user_policies()` with fluent group and namespace filters and typed structured/raw
   response states.
+- Add `Client::livez()`, `Client::readyz()`, and `Client::openapi()` for the canonical operational
+  probes and generated OpenAPI document introduced by treetop-rest v0.0.10.
+- Expose the server-reported optional `RequestLimits::max_batch_size` field.
 
 ### Changed
 
@@ -44,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Successful plain-text endpoints now reject invalid UTF-8 instead of replacing invalid bytes.
 - User-policy endpoint parameters are validated before transport, and path spaces are encoded as
   `%20` rather than form-style `+`.
+- Target treetop-rest v0.0.10 for the full integration suite and extend stable compatibility
+  coverage through v0.0.10.
 
 ### Fixed
 
@@ -114,5 +123,6 @@ Targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-rest/releases/t
 - Tag-driven crates.io and GitHub release automation, including first-release token bootstrap and
   subsequent OIDC trusted publishing.
 
-[Unreleased]: https://github.com/terjekv/treetop-client/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/terjekv/treetop-client/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/terjekv/treetop-client/releases/tag/v0.0.2
 [0.0.1]: https://github.com/terjekv/treetop-client/releases/tag/v0.0.1

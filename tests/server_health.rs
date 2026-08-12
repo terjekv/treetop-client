@@ -12,6 +12,26 @@ async fn health_returns_ok() {
 }
 
 #[tokio::test]
+async fn operational_probes_report_live_and_ready() {
+    let s = server().await;
+    s.client().livez().await.unwrap();
+    assert!(s.client().readyz().await.unwrap());
+}
+
+#[tokio::test]
+async fn openapi_reports_the_running_server_version() {
+    let s = server().await;
+    let document = s.client().openapi().await.unwrap();
+    let version = s.client().version().await.unwrap();
+
+    assert_eq!(document["openapi"], "3.1.0");
+    assert_eq!(
+        document["info"]["version"],
+        version.version.trim_start_matches('v')
+    );
+}
+
+#[tokio::test]
 async fn version_has_expected_fields() {
     let s = server().await;
     let info = s.client().version().await.unwrap();
@@ -54,7 +74,7 @@ async fn status_reports_schema_defaults() {
     );
     assert!(
         status.policy_configuration.schema.is_some(),
-        "v0.0.7 status should include schema metadata"
+        "the target server should include schema metadata"
     );
 }
 
@@ -84,6 +104,7 @@ async fn status_has_parallel_config() {
 async fn status_has_request_limits() {
     let s = server().await;
     let status = s.client().status().await.unwrap();
+    assert_eq!(status.request_limits.max_batch_size, Some(1024));
     assert_eq!(status.request_limits.max_context_bytes, 16 * 1024);
     assert_eq!(status.request_limits.max_context_depth, 8);
     assert_eq!(status.request_limits.max_context_keys, 64);

@@ -49,8 +49,8 @@ If an external service or tool is unavailable, state exactly which check remains
 - Add or update a `cargo-fuzz` target for parsers and other untrusted-input boundaries.
 
 The `TREETOP_TEST_IMAGE` environment variable selects the container image used by server tests.
-CI runs the stable compatibility contract against treetop-rest v0.0.4 through v0.0.7 and the full
-suite against v0.0.7.
+CI runs the stable compatibility contract against treetop-rest v0.0.4 through v0.0.10 and the full
+suite against v0.0.10.
 
 ### Wire compatibility
 
