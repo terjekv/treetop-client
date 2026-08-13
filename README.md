@@ -10,7 +10,7 @@ Treetop is a Cedar-based policy evaluation service. This client provides a typed
 
 This version targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.10).
 CI verifies the stable health, version, policy, and authorization contract against v0.0.4 through
-v0.0.10; v0.0.10 receives the complete endpoint suite. Newer response fields use
+v0.0.11; v0.0.10 receives the complete endpoint suite. Newer response fields use
 `#[serde(default)]` for backward compatibility.
 
 ## Features
