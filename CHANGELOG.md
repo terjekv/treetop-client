@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Extend the stable treetop-rest compatibility matrix through v0.0.11 after passing the complete
+  v0.0.2 client suite against the server-only release.
+
 ## [0.0.2] - 2026-08-13
 
 Targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.10).

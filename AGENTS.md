@@ -171,6 +171,12 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 
 - Follow `RELEASING.md`; do not improvise around the release workflow.
 - Do not bump the package version until the release has a concrete payload.
+- Before preparing a release commit, update all Rust dependencies and GitHub Actions to their
+  latest stable versions, and pin every Action to its full commit SHA. Refresh every committed
+  lockfile, review upstream release notes for compatibility and MSRV changes, and run the full
+  verification, RustSec, and cargo-deny checks on the resulting dependency set.
+- Land dependency and GitHub Actions updates before the version-bump release commit so the signed
+  release tag points at a green commit that already contains every update.
 - Before tagging, update `Cargo.toml`, `Cargo.lock`, README installation examples, changelog section
   and comparison links, then run `scripts/check-release.sh vX.Y.Z` from a clean checkout.
 - Release commits must be on `main`. Release tags must be signed, annotated
