@@ -48,7 +48,7 @@ jobs:
       matrix:
         server-version: [v0.0.4, v0.0.5, v0.0.6, v0.0.7, v0.0.8, v0.0.9, v0.0.10, v0.0.11]
     env:
-      TREETOP_TEST_IMAGE: ghcr.io/terjekv/treetop-rest:${{ matrix.server-version }}
+      TREETOP_TEST_IMAGE: ghcr.io/treetop-policy-engine/treetop-rest:${{ matrix.server-version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master

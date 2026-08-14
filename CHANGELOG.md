@@ -9,12 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Move the canonical source repository to the `treetop-policy-engine` GitHub organization and use
+  organization-owned server images for compatibility testing. The crate name and API are unchanged.
 - Extend the stable treetop-rest compatibility matrix through v0.0.11 after passing the complete
   v0.0.2 client suite against the server-only release.
 
 ## [0.0.2] - 2026-08-13
 
-Targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.10).
+Targets
+[treetop-rest v0.0.10](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.10).
 
 ### Added
 
@@ -75,7 +78,8 @@ Targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/
 
 ## [0.0.1] - 2026-08-10
 
-Targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.7).
+Targets
+[treetop-rest v0.0.7](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.7).
 
 ### Added
 
@@ -128,6 +132,6 @@ Targets [treetop-rest v0.0.7](https://github.com/terjekv/treetop-rest/releases/t
 - Tag-driven crates.io and GitHub release automation, including first-release token bootstrap and
   subsequent OIDC trusted publishing.
 
-[Unreleased]: https://github.com/terjekv/treetop-client/compare/v0.0.2...HEAD
-[0.0.2]: https://github.com/terjekv/treetop-client/releases/tag/v0.0.2
-[0.0.1]: https://github.com/terjekv/treetop-client/releases/tag/v0.0.1
+[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.2
+[0.0.1]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.1
