@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-08-14
+
+Targets
+[treetop-rest v0.0.12](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.12).
+
 ### Changed
 
 - Move the canonical source repository to the `treetop-policy-engine` GitHub organization and use
@@ -134,6 +139,7 @@ Targets
 - Tag-driven crates.io and GitHub release automation, including first-release token bootstrap and
   subsequent OIDC trusted publishing.
 
-[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.3
 [0.0.2]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.2
 [0.0.1]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.1
