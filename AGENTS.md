@@ -30,7 +30,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 - Run the compatibility contract against a specific supported server with:
 
   ```bash
-  TREETOP_TEST_IMAGE=ghcr.io/terjekv/treetop-rest:vX.Y.Z \
+  TREETOP_TEST_IMAGE=ghcr.io/treetop-policy-engine/treetop-rest:vX.Y.Z \
     cargo test --features server-tests --test server_compat
   ```
 

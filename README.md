@@ -1,14 +1,17 @@
 # treetop-client
 
-A Rust client library for [Treetop](https://github.com/terjekv/treetop-rest) policy authorization servers.
+A Rust client library for
+[Treetop](https://github.com/treetop-policy-engine/treetop-rest) policy authorization servers.
 
-Treetop is a Cedar-based policy evaluation service. This client provides a typed, async API for evaluating authorization requests, managing policies, and querying server status.
+Treetop is a Cedar-based policy evaluation service. This client provides a typed, async API for evaluating
+authorization requests, managing policies, and querying server status.
 
 ## Compatibility
 
 `treetop-client` is pre-1.0; API compatibility is not guaranteed between `0.0.x` releases.
 
-This version targets [treetop-rest v0.0.10](https://github.com/terjekv/treetop-rest/releases/tag/v0.0.10).
+This version targets
+[treetop-rest v0.0.10](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.10).
 CI verifies the stable health, version, policy, and authorization contract against v0.0.4 through
 v0.0.11; v0.0.10 receives the complete endpoint suite. Newer response fields use
 `#[serde(default)]` for backward compatibility.
@@ -308,7 +311,9 @@ let batch = AuthorizeRequest::from_auth_requests([request])?;
 let response = client.authorization(&batch).send().await?;
 ```
 
-Inspect `status.request_context` if you need to know whether the server runtime is currently schema-backed or running in permissive fallback mode. Uploading a schema via `upload_schema_raw()` or `upload_schema_json()` lets you verify the schema-backed path explicitly.
+Inspect `status.request_context` if you need to know whether the server runtime is currently schema-backed or
+running in permissive fallback mode. Uploading a schema via `upload_schema_raw()` or `upload_schema_json()` lets
+you verify the schema-backed path explicitly.
 
 ### Prometheus metrics
 

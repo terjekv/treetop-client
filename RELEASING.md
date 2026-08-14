@@ -16,7 +16,7 @@ release with one of these approaches:
    - Store the token as the `CRATES_IO_BOOTSTRAP_TOKEN` environment secret.
    - Merge the release commit to `main`, create the signed tag `v0.0.1`, and push it.
    - After the workflow publishes, configure the crates.io trusted publisher for repository
-     `terjekv/treetop-client`, workflow `release.yml`, and environment `release`.
+     `treetop-policy-engine/treetop-client`, workflow `release.yml`, and environment `release`.
    - Revoke the bootstrap token and delete the GitHub secret.
 
 2. Manual bootstrap:
