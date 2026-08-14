@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Move the canonical source repository to the `treetop-policy-engine` GitHub organization and use
   organization-owned server images for compatibility testing. The crate name and API are unchanged.
-- Extend the stable treetop-rest compatibility matrix through v0.0.11 after passing the complete
-  v0.0.2 client suite against the server-only release.
+- Extend the stable treetop-rest compatibility matrix through v0.0.12 and run the complete client
+  suite against v0.0.12 by default.
+- Refresh Rust dependencies to the latest releases compatible with Rust 1.85, including rstest
+  v0.26.1, and update pinned GitHub Actions to their latest stable revisions.
 
 ## [0.0.2] - 2026-08-13
 
