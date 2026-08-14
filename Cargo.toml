@@ -1,6 +1,6 @@
 [package]
 name = "treetop-client"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 description = "Typed async Rust client for Treetop policy authorization servers"
 license = "MIT"
