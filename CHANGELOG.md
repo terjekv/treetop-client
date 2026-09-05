@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Verify the complete endpoint suite against REST v0.0.16 and extend the stable
+  compatibility matrix through v0.0.16. Live authorization checks compare every
+  policy-version field with the server version endpoint.
+
 ## [0.0.4] - 2026-09-05
 
 ### Changed

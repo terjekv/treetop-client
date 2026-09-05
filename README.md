@@ -11,9 +11,9 @@ authorization requests, managing policies, and querying server status.
 `treetop-client` is pre-1.0; API compatibility is not guaranteed between `0.0.x` releases.
 
 This version targets
-[treetop-rest v0.0.12](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.12).
+[treetop-rest v0.0.16](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.16).
 CI verifies the stable health, version, policy, and authorization contract against v0.0.4 through
-v0.0.12; v0.0.12 receives the complete endpoint suite. Newer response fields use
+v0.0.16; v0.0.16 receives the complete endpoint suite. Newer response fields use
 `#[serde(default)]` for backward compatibility.
 
 ## Features
@@ -289,7 +289,7 @@ println!("OpenAPI version: {}", openapi["openapi"]);
 ### Request context
 
 Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by
-`treetop-rest v0.0.12`. The client automatically enforces `RequestLimits::default()` before
+`treetop-rest v0.0.16`. The client automatically enforces `RequestLimits::default()` before
 transport; configure limits reported by a differently configured server with
 `ClientBuilder::request_limits()`.
 

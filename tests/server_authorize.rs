@@ -276,8 +276,8 @@ async fn response_version_matches_server() {
     let resp = client.authorize(&batch).await.unwrap();
 
     assert_eq!(
-        resp.version().hash,
-        version_info.policies.hash,
-        "authorize response version hash should match server version"
+        resp.version(),
+        &version_info.policies,
+        "authorize response must retain the complete server policy version"
     );
 }
