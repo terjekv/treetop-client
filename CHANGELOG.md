@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `PolicyVersion` now retains nullable `label_set` and unsigned
+  `generation` metadata. Add `label_set: None, generation: 0` to existing struct
+  literals. Responses from older servers default missing fields to those values;
+  serialization includes both fields.
+- Brief and detailed batch validation compares every version field and rejects
+  results that differ only in label configuration or engine generation.
+
+### Security
+
+- Update the locked HTTP/2 dependency to h2 0.4.19, fixing
+  RUSTSEC-2026-0258 (unbounded empty DATA frames). Replace yanked chacha20
+  0.10.1 with 0.10.2 in the client and fuzz lockfiles; Rust 1.85 remains supported.
+
 ## [0.0.3] - 2026-08-14
 
 Targets
