@@ -1091,6 +1091,8 @@ fn policy_version_display() {
     let v = treetop_client::PolicyVersion {
         hash: "abc123".to_string(),
         loaded_at: "2026-01-01T00:00:00Z".to_string(),
+        label_set: None,
+        generation: 0,
     };
     assert_eq!(format!("{v}"), "abc123 (loaded 2026-01-01T00:00:00Z)");
 }

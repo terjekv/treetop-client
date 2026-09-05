@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `PolicyVersion` now retains nullable `label_set` and unsigned
+  `generation` metadata. Add `label_set: None, generation: 0` to existing struct
+  literals. Responses from older servers default missing fields to those values;
+  serialization includes both fields.
+- Brief and detailed batch validation compares every version field and rejects
+  results that differ only in label configuration or engine generation.
+
 ## [0.0.3] - 2026-08-14
 
 Targets

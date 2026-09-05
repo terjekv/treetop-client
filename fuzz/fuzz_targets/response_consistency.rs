@@ -19,6 +19,8 @@ fuzz_target!(|data: &[u8]| {
     let version = PolicyVersion {
         hash: "batch".to_string(),
         loaded_at: "2026-01-01T00:00:00Z".to_string(),
+        label_set: None,
+        generation: 0,
     };
     let mut results = Vec::with_capacity(result_count);
 
@@ -42,6 +44,8 @@ fuzz_target!(|data: &[u8]| {
                         PolicyVersion {
                             hash: "other".to_string(),
                             loaded_at: version.loaded_at.clone(),
+                            label_set: None,
+                            generation: 0,
                         }
                     },
                     policy_id: if has_policy {

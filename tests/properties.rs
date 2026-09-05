@@ -36,6 +36,8 @@ fn policy_version(hash: &str) -> PolicyVersion {
     PolicyVersion {
         hash: hash.to_string(),
         loaded_at: "2026-01-01T00:00:00Z".to_string(),
+        label_set: None,
+        generation: 0,
     }
 }
 
@@ -173,5 +175,28 @@ proptest! {
         };
         data.version = policy_version("different");
         prop_assert!(response.validate(successes.len()).is_err());
+    }
+}
+
+#[test]
+fn brief_and_detailed_batches_reject_incomplete_state_matches() {
+    for field in ["label_set", "generation"] {
+        let response = valid_response(&[true]);
+        let mut wire = serde_json::to_value(&response).unwrap();
+        wire["results"][0]["result"]["version"][field] = if field == "label_set" {
+            serde_json::json!("different-labels")
+        } else {
+            serde_json::json!(1)
+        };
+        let brief: AuthorizeBriefResponse = serde_json::from_value(wire.clone()).unwrap();
+        assert!(brief.validate(1).is_err(), "brief {field}");
+
+        let result = wire["results"][0]["result"].as_object_mut().unwrap();
+        result.remove("policy_id");
+        result.insert("decision".into(), serde_json::json!("Deny"));
+        result.insert("policy".into(), serde_json::json!([]));
+        let detailed: treetop_client::AuthorizeDetailedResponse =
+            serde_json::from_value(wire).unwrap();
+        assert!(detailed.validate(1).is_err(), "detailed {field}");
     }
 }
