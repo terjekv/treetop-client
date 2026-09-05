@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refresh Rust dependencies to the latest releases compatible with Rust 1.85,
+  including HTTP/TLS and platform fixes, and pin GitHub Actions to stable release
+  commits. Keep serial_test 3 because version 4 requires Rust 1.93.1.
+
 - **Breaking:** `PolicyVersion` now retains nullable `label_set` and unsigned
   `generation` metadata. Add `label_set: None, generation: 0` to existing struct
   literals. Responses from older servers default missing fields to those values;
