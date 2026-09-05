@@ -37,7 +37,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-treetop-client = "0.0.3"
+treetop-client = "0.0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
