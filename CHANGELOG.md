@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.1.0] - 2026-09-06
 
-- Verify the complete endpoint suite against REST v0.0.16 and extend the stable
-  compatibility matrix through v0.0.16. Live authorization checks compare every
-  policy-version field with the server version endpoint.
+### Breaking changes
+
+- Target the coordinated REST 0.1.0 contract and its declared label scopes. Require
+  every policy-version field, current status metadata, batch limits, and policy
+  match metadata. `label_set` accepts explicit null; missing fields fail parsing.
+- Remove deprecated `try_*` forwarding constructors/builders and `health()`.
+  Use the canonical fallible constructors/builders, `livez()`, and `readyz()`.
+- Reject legacy bare-string metadata sources; use `{ "url": "https://..." }`.
+  Schema metadata and schema-validation mode are required in status responses.
+- Remove historical server matrices and compatibility defaults. CI tests the
+  complete endpoint suite against an exact unmerged REST candidate. Keep package
+  contents scoped to library sources and public documentation.
+- See [MIGRATION.md](MIGRATION.md) for the coordinated configuration, API, and
+  metadata migration. No merge or publication is authorized before approval.
 
 ## [0.0.4] - 2026-09-05
 

@@ -93,15 +93,6 @@ impl Resource {
         Ok(resource)
     }
 
-    /// Creates and validates a new resource with no attributes.
-    #[deprecated(since = "0.0.2", note = "Resource::new now validates its input")]
-    pub fn try_new(
-        kind: impl Into<String>,
-        id: impl Into<String>,
-    ) -> Result<Self, ValidationError> {
-        Self::new(kind, id)
-    }
-
     /// Adds a typed attribute to this resource (builder pattern).
     ///
     /// If the key already exists, its value is overwritten.
@@ -114,16 +105,6 @@ impl Resource {
         validate_attribute_name(&key, "resource.attrs")?;
         self.attrs.insert(key, value);
         Ok(self)
-    }
-
-    /// Adds an attribute after validating its name.
-    #[deprecated(since = "0.0.2", note = "Resource::with_attr now validates its input")]
-    pub fn try_with_attr(
-        self,
-        key: impl Into<String>,
-        value: AttrValue,
-    ) -> Result<Self, ValidationError> {
-        self.with_attr(key, value)
     }
 
     /// Returns the qualified Cedar resource type.

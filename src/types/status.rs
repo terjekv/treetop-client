@@ -6,8 +6,7 @@ use crate::error::TreetopError;
 
 /// The endpoint from which server-managed policy data was loaded.
 ///
-/// Current servers serialize this as `{ "url": "https://..." }`. Deserialization also accepts
-/// the legacy bare-string representation used by older snapshots.
+/// The wire representation is `{ "url": "https://..." }`. Bare strings are rejected.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MetadataSource(String);
 
@@ -56,15 +55,11 @@ impl<'de> Deserialize<'de> for MetadataSource {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Representation {
-            Endpoint { url: String },
-            Legacy(String),
+        #[serde(deny_unknown_fields)]
+        struct Endpoint {
+            url: String,
         }
-
-        let url = match Representation::deserialize(deserializer)? {
-            Representation::Endpoint { url } | Representation::Legacy(url) => url,
-        };
+        let url = Endpoint::deserialize(deserializer)?.url;
         Self::try_new(url).map_err(serde::de::Error::custom)
     }
 }
@@ -112,23 +107,20 @@ pub struct PoliciesMetadata {
     /// Whether the server allows policy uploads.
     pub allow_upload: bool,
     /// The Cedar schema validation mode (e.g. `"permissive"` or `"strict"`).
-    #[serde(default)]
     pub schema_validation_mode: String,
     /// Metadata about the currently loaded policies.
     pub policies: Metadata,
     /// Metadata about the currently loaded labels.
     pub labels: Metadata,
     /// Metadata about the currently loaded Cedar schema, if any.
-    #[serde(default)]
-    pub schema: Option<Metadata>,
+    pub schema: Metadata,
 }
 
 /// Server-enforced limits on authorization request context values.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RequestLimits {
-    /// Maximum requests accepted in one authorization batch, when reported by the server.
-    #[serde(default)]
-    pub max_batch_size: Option<usize>,
+    /// Maximum requests accepted in one authorization batch. Required on the wire.
+    pub max_batch_size: usize,
     /// Maximum total size in bytes for context values in a single request.
     pub max_context_bytes: usize,
     /// Maximum nesting depth for context values.
@@ -140,7 +132,7 @@ pub struct RequestLimits {
 impl Default for RequestLimits {
     fn default() -> Self {
         Self {
-            max_batch_size: None,
+            max_batch_size: 1024,
             max_context_bytes: 16 * 1024,
             max_context_depth: 8,
             max_context_keys: 64,
@@ -183,10 +175,8 @@ pub struct StatusResponse {
     /// Represented as opaque JSON since the structure may vary.
     pub parallel_configuration: serde_json::Value,
     /// Server-enforced limits on authorization request context.
-    #[serde(default)]
     pub request_limits: RequestLimits,
     /// Runtime request-context mode and fallback status.
-    #[serde(default)]
     pub request_context: RequestContextStatus,
 }
 
@@ -195,7 +185,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_response_deserialization_v007() {
+    fn status_response_deserialization_current() {
         let json = serde_json::json!({
             "policy_configuration": {
                 "allow_upload": true,
@@ -251,8 +241,8 @@ mod tests {
             "permissive"
         );
         assert_eq!(status.policy_configuration.policies.entries, 5);
-        assert!(status.policy_configuration.schema.is_some());
-        assert_eq!(status.request_limits.max_batch_size, Some(1024));
+        assert!(!status.policy_configuration.schema.timestamp.is_empty());
+        assert_eq!(status.request_limits.max_batch_size, 1024);
         assert_eq!(status.request_limits.max_context_bytes, 16384);
         assert!(status.request_context.supported);
         assert!(!status.request_context.schema_backed);
@@ -263,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn status_response_backward_compat_v004() {
+    fn status_response_rejects_omitted_current_metadata() {
         let json = serde_json::json!({
             "policy_configuration": {
                 "allow_upload": true,
@@ -285,18 +275,13 @@ mod tests {
             "parallel_configuration": { "cpu_count": 4 }
         });
 
-        let status: StatusResponse = serde_json::from_value(json).unwrap();
-        assert!(status.policy_configuration.allow_upload);
-        assert_eq!(status.policy_configuration.schema_validation_mode, "");
-        assert!(status.policy_configuration.schema.is_none());
-        assert_eq!(status.request_limits, RequestLimits::default());
-        assert_eq!(status.request_context, RequestContextStatus::default());
+        assert!(serde_json::from_value::<StatusResponse>(json).is_err());
     }
 
     #[test]
     fn request_limits_default() {
         let limits = RequestLimits::default();
-        assert_eq!(limits.max_batch_size, None);
+        assert_eq!(limits.max_batch_size, 1024);
         assert_eq!(limits.max_context_bytes, 16 * 1024);
         assert_eq!(limits.max_context_depth, 8);
         assert_eq!(limits.max_context_keys, 64);
@@ -335,13 +320,13 @@ mod tests {
     }
 
     #[test]
-    fn metadata_source_accepts_legacy_string_shape() {
-        let source: MetadataSource = serde_json::from_value(serde_json::json!(
-            "https://example.com/legacy-policies.cedar"
-        ))
-        .unwrap();
-
-        assert_eq!(source.as_str(), "https://example.com/legacy-policies.cedar");
+    fn metadata_source_rejects_legacy_string_shape() {
+        assert!(
+            serde_json::from_value::<MetadataSource>(serde_json::json!(
+                "https://example.com/legacy.cedar"
+            ))
+            .is_err()
+        );
     }
 
     #[test]

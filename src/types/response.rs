@@ -320,11 +320,11 @@ mod tests {
                 "status": "success",
                 "result": {
                     "decision": "Allow",
-                    "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+                    "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
                     "policy_id": "policy1"
                 }
             }],
-            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 1,
             "failed": 0
         });
@@ -353,7 +353,7 @@ mod tests {
                 "status": "failed",
                 "error": "invalid principal"
             }],
-            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 0,
             "failed": 1
         });
@@ -374,11 +374,11 @@ mod tests {
                 "status": "success",
                 "result": {
                     "decision": "Deny",
-                    "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+                    "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
                     "policy_id": "policy1"
                 }
             }],
-            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 1,
             "failed": 0
         });

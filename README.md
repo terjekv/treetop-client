@@ -6,15 +6,12 @@ A Rust client library for
 Treetop is a Cedar-based policy evaluation service. This client provides a typed, async API for evaluating
 authorization requests, managing policies, and querying server status.
 
-## Compatibility
+## Current contract
 
-`treetop-client` is pre-1.0; API compatibility is not guaranteed between `0.0.x` releases.
-
-This version targets
-[treetop-rest v0.0.16](https://github.com/treetop-policy-engine/treetop-rest/releases/tag/v0.0.16).
-CI verifies the stable health, version, policy, and authorization contract against v0.0.4 through
-v0.0.16; v0.0.16 receives the complete endpoint suite. Newer response fields use
-`#[serde(default)]` for backward compatibility.
+Version 0.1.0 targets the coordinated REST 0.1.0 contract. Early releases prioritize
+correctness over compatibility: deprecated APIs, legacy endpoint methods, omitted
+metadata defaults, and old-server matrices are removed. See [MIGRATION.md](MIGRATION.md).
+CI runs the full endpoint suite against an exact pinned REST candidate before release.
 
 ## Features
 
@@ -37,7 +34,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-treetop-client = "0.0.4"
+treetop-client = "0.1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -54,7 +51,7 @@ async fn main() -> treetop_client::Result<()> {
     let client = Client::builder("https://treetop.example.com").build()?;
 
     // Check server health
-    client.health().await?;
+    client.livez().await?;
 
     // Simple authorization check
     let allowed = client
@@ -289,7 +286,7 @@ println!("OpenAPI version: {}", openapi["openapi"]);
 ### Request context
 
 Request-scoped context is serialized on the wire via `AuthRequest.context` and evaluated by
-`treetop-rest v0.0.16`. The client automatically enforces `RequestLimits::default()` before
+`treetop-rest 0.1.0`. The client automatically enforces `RequestLimits::default()` before
 transport; configure limits reported by a differently configured server with
 `ClientBuilder::request_limits()`.
 
@@ -328,7 +325,7 @@ All methods return `treetop_client::Result<T>`, which uses `TreetopError`:
 ```rust
 use treetop_client::TreetopError;
 
-match client.health().await {
+match client.livez().await {
     Ok(()) => println!("Server is healthy"),
     Err(TreetopError::Transport(e)) => println!("Network error: {e}"),
     Err(TreetopError::Api { status, message }) => {

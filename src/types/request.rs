@@ -121,24 +121,6 @@ impl AuthRequest {
         Ok(self)
     }
 
-    /// Creates an authorization request with a validated client-provided correlation ID.
-    #[deprecated(since = "0.0.2", note = "use AuthRequest::new(request).with_id(id)")]
-    pub fn try_with_id(id: impl Into<String>, request: Request) -> Result<Self, ValidationError> {
-        Self::new(request).with_id(id)
-    }
-
-    /// Sets context after validating all context keys.
-    #[deprecated(
-        since = "0.0.2",
-        note = "AuthRequest::with_context now validates its input"
-    )]
-    pub fn try_with_context(
-        self,
-        context: HashMap<String, AttrValue>,
-    ) -> Result<Self, ValidationError> {
-        self.with_context(context)
-    }
-
     /// Returns the optional client-provided correlation ID.
     pub fn id(&self) -> Option<&str> {
         self.id.as_ref().map(RequestId::as_str)
@@ -319,19 +301,6 @@ impl AuthorizeRequest {
         }
         self.requests.push(request);
         Ok(self)
-    }
-
-    /// Adds a request after validating its client-provided correlation ID.
-    #[deprecated(
-        since = "0.0.2",
-        note = "AuthorizeRequest::add_request_with_id now validates its input"
-    )]
-    pub fn try_add_request_with_id(
-        self,
-        id: impl Into<String>,
-        request: Request,
-    ) -> Result<Self, ValidationError> {
-        self.add_request_with_id(id, request)
     }
 
     /// Returns all requests in this batch.

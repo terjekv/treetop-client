@@ -32,26 +32,11 @@ impl Group {
         Ok(group)
     }
 
-    /// Creates and validates a new group with no namespace.
-    #[deprecated(since = "0.0.2", note = "Group::new now validates its input")]
-    pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
-        Self::new(id)
-    }
-
     /// Sets and validates the Cedar namespace for this group.
     pub fn with_namespace(mut self, namespace: Vec<String>) -> Result<Self, ValidationError> {
         self.namespace = Namespace::new(namespace);
         self.validate()?;
         Ok(self)
-    }
-
-    /// Sets and validates the Cedar namespace for this group.
-    #[deprecated(
-        since = "0.0.2",
-        note = "Group::with_namespace now validates its input"
-    )]
-    pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
-        self.with_namespace(namespace)
     }
 
     /// Returns the group entity identifier.
@@ -101,23 +86,11 @@ impl User {
         Ok(user)
     }
 
-    /// Creates and validates a new user with no namespace or groups.
-    #[deprecated(since = "0.0.2", note = "User::new now validates its input")]
-    pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
-        Self::new(id)
-    }
-
     /// Sets and validates the Cedar namespace for this user.
     pub fn with_namespace(mut self, namespace: Vec<String>) -> Result<Self, ValidationError> {
         self.namespace = Namespace::new(namespace);
         self.validate()?;
         Ok(self)
-    }
-
-    /// Sets and validates the Cedar namespace for this user.
-    #[deprecated(since = "0.0.2", note = "User::with_namespace now validates its input")]
-    pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
-        self.with_namespace(namespace)
     }
 
     /// Sets the group memberships using pre-built [`Group`] values.

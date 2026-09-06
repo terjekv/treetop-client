@@ -19,7 +19,7 @@ use treetop_client::{
 // Container image
 // ==========================================================================
 
-const DEFAULT_IMAGE: &str = "ghcr.io/treetop-policy-engine/treetop-rest:v0.0.16";
+const DEFAULT_IMAGE: &str = "ghcr.io/treetop-policy-engine/treetop-rest:v0.1.0";
 const IMAGE_ENV: &str = "TREETOP_TEST_IMAGE";
 const CONTAINER_PREFIX: &str = "treetop-test-";
 const TEST_LABEL_KEY: &str = "treetop-client.test";
@@ -259,7 +259,7 @@ impl TestServer {
             .build()
             .unwrap();
         for attempt in 1..=120 {
-            match client.health().await {
+            match client.livez().await {
                 Ok(()) => return,
                 Err(_) if attempt < 120 => {
                     tokio::time::sleep(Duration::from_millis(500)).await;

@@ -85,7 +85,6 @@ pub struct UserPolicies {
     /// The matching policies in Cedar JSON format.
     pub policies: Vec<serde_json::Value>,
     /// Match metadata explaining why each policy was selected.
-    #[serde(default)]
     pub matches: Vec<PolicyMatch>,
 }
 
@@ -107,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn user_policies_deserialization_v005() {
+    fn user_policies_deserialization_current() {
         let json = serde_json::json!({
             "user": "alice",
             "policies": [
@@ -126,14 +125,12 @@ mod tests {
     }
 
     #[test]
-    fn user_policies_backward_compat_no_matches() {
+    fn user_policies_reject_missing_matches() {
         let json = serde_json::json!({
             "user": "alice",
             "policies": [{"effect": "permit"}]
         });
-        let up: UserPolicies = serde_json::from_value(json).unwrap();
-        assert_eq!(up.user, "alice");
-        assert!(up.matches.is_empty());
+        assert!(serde_json::from_value::<UserPolicies>(json).is_err());
     }
 
     #[test]

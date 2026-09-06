@@ -24,12 +24,6 @@ impl UploadToken {
         Ok(token)
     }
 
-    /// Creates an upload token after validating that it can be sent as an HTTP header value.
-    #[deprecated(since = "0.0.2", note = "UploadToken::new now validates its input")]
-    pub fn try_new(token: impl Into<String>) -> Result<Self, ValidationError> {
-        Self::new(token)
-    }
-
     /// Validates that this token is non-empty and safe to place in an HTTP header.
     pub fn validate(&self) -> Result<(), ValidationError> {
         let value = self.expose();

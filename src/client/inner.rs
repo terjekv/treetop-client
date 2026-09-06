@@ -460,32 +460,10 @@ impl<Capability> Client<Capability> {
 
     // --- Public API ---
 
-    /// Checks server liveness by hitting `GET /api/v1/health`.
-    ///
-    /// Returns `Ok(())` if the server is reachable and healthy.
-    pub async fn health(&self) -> Result<()> {
-        let resp = self
-            .apply_headers(self.state.http.get(self.state.endpoint("health")))
-            .send()
-            .await
-            .map_err(TreetopError::Transport)?;
-        let status = resp.status();
-        if status.is_success() {
-            self.read_body(
-                resp,
-                ERROR_BODY_LIMIT.min(self.state.max_response_bytes.get()),
-            )
-            .await?;
-            Ok(())
-        } else {
-            Err(self.api_error(resp).await)
-        }
-    }
-
     /// Checks process liveness through the canonical `GET /livez` operational probe.
     ///
-    /// Returns `Ok(())` after a successful, bounded UTF-8 response. Unlike
-    /// [`health`](Self::health), this probe is independent of server configuration state.
+    /// Returns `Ok(())` after a successful, bounded UTF-8 response. This probe
+    /// is independent of server configuration state.
     pub async fn livez(&self) -> Result<()> {
         self.get_text(self.state.base_url.root_endpoint("livez"))
             .await

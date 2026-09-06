@@ -24,38 +24,31 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo test --all-targets
-      - run: cargo test --doc
+      - run: cargo test --locked --all-targets
+      - run: cargo test --locked --doc
 
-  server-latest:
-    name: Server integration (v0.0.16)
+  server-current:
+    name: Current server integration (0.1.0 candidate)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo test --all-features
-
-  server-compatibility:
-    name: Server compatibility (${{ matrix.server-version }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        server-version: [v0.0.4, v0.0.5, v0.0.6, v0.0.7, v0.0.8, v0.0.9, v0.0.10, v0.0.11, v0.0.12, v0.0.13, v0.0.14, v0.0.15, v0.0.16]
+    timeout-minutes: 30
     env:
-      TREETOP_TEST_IMAGE: ghcr.io/treetop-policy-engine/treetop-rest:${{ matrix.server-version }}
+      TREETOP_TEST_IMAGE: treetop-rest-candidate:0.1.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out exact REST candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: treetop-policy-engine/treetop-rest
+          ref: 316f1a9213b1ed04cd748c66eafb3bf4b4085a9b
+          path: .candidate-rest
+          persist-credentials: false
+      - name: Build candidate server
+        run: docker build -t "$TREETOP_TEST_IMAGE" .candidate-rest
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo test --features server-tests --test server_compat
+      - run: cargo test --locked --all-features
 
   clippy:
     name: Clippy
@@ -68,7 +61,7 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   fmt:
     name: Format
@@ -92,7 +85,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo doc --no-deps --all-features
+      - run: cargo doc --locked --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -106,7 +99,7 @@ jobs:
         with:
           toolchain: 1.85.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo check --all-features
+      - run: cargo check --locked --all-features
 
   audit:
     name: RustSec audit

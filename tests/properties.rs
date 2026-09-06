@@ -122,7 +122,7 @@ proptest! {
             .unwrap();
 
         let at_boundary = request.validate_context(RequestLimits {
-            max_batch_size: None,
+            max_batch_size: 1024,
             max_context_bytes: usize::MAX,
             max_context_depth: depth,
             max_context_keys: usize::MAX,
@@ -131,7 +131,7 @@ proptest! {
 
         if depth > 0 {
             let below_boundary = request.validate_context(RequestLimits {
-                max_batch_size: None,
+                max_batch_size: 1024,
                 max_context_bytes: usize::MAX,
                 max_context_depth: depth - 1,
                 max_context_keys: usize::MAX,

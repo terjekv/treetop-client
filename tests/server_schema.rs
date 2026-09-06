@@ -43,7 +43,7 @@ async fn upload_schema_enables_schema_backed_context_runtime() {
         .await
         .unwrap();
     assert!(
-        metadata.schema.is_some(),
+        !metadata.schema.timestamp.is_empty(),
         "schema metadata should be populated"
     );
 

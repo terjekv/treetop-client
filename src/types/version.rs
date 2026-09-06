@@ -15,13 +15,18 @@ pub struct PolicyVersion {
     /// ISO 8601 timestamp of when these policies were loaded.
     pub loaded_at: String,
     /// Stable label configuration identifier, when supplied by the server.
-    /// Older servers omit this field, which defaults to `None`.
-    #[serde(default)]
+    /// Required on the wire; explicit null means no configured label identifier.
+    #[serde(deserialize_with = "deserialize_label_set")]
     pub label_set: Option<String>,
     /// Generation within one engine instance; this can restart on replacement.
-    /// Older servers omit this field, which defaults to zero.
-    #[serde(default)]
+    /// Required on the wire; no old-server default is inferred.
     pub generation: u64,
+}
+
+fn deserialize_label_set<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
 }
 
 impl std::fmt::Display for PolicyVersion {
@@ -69,8 +74,7 @@ mod tests {
                 "hash": "abc123",
                 "loaded_at": "2025-01-01T00:00:00Z",
                 "label_set": "labels-v2",
-                "generation": 7
-            }
+                "generation": 7}
         });
         let info: VersionInfo = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(info.version, "0.1.0");
@@ -94,12 +98,10 @@ mod tests {
             },
             "policies": {
                 "hash": "abc123",
-                "loaded_at": "2025-01-01T00:00:00Z"
-            },
+                "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "schema": {
                 "hash": "schema123",
-                "loaded_at": "2025-01-01T00:00:01Z"
-            }
+                "loaded_at": "2025-01-01T00:00:01Z", "label_set": null, "generation": 0}
         });
 
         let info: VersionInfo = serde_json::from_value(json).unwrap();
@@ -109,6 +111,21 @@ mod tests {
         );
         assert_eq!(info.policies.label_set, None);
         assert_eq!(info.policies.generation, 0);
+    }
+
+    #[test]
+    fn policy_version_requires_every_current_field() {
+        let complete =
+            serde_json::json!({"hash":"h","loaded_at":"t","label_set":null,"generation":0});
+        for field in ["hash", "loaded_at", "label_set", "generation"] {
+            let mut incomplete = complete.clone();
+            incomplete.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<PolicyVersion>(incomplete).is_err(),
+                "{field}"
+            );
+        }
+        assert!(serde_json::from_value::<PolicyVersion>(complete).is_ok());
     }
 
     #[test]
@@ -122,14 +139,12 @@ mod tests {
         ] {
             let value = serde_json::json!({
                 "hash": "hash", "loaded_at": "2026-09-05T00:00:00Z",
-                "label_set": null, "generation": generation,
-            });
+                "label_set": null, "generation": generation});
             assert!(serde_json::from_value::<PolicyVersion>(value).is_err());
         }
         let value = serde_json::json!({
             "hash": "hash", "loaded_at": "2026-09-05T00:00:00Z",
-            "label_set": null, "generation": u64::MAX,
-        });
+            "label_set": null, "generation": u64::MAX});
         let version: PolicyVersion = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(version.generation, u64::MAX);
         assert_eq!(serde_json::to_value(version).unwrap(), value);

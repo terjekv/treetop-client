@@ -16,7 +16,7 @@ async fn correlation_id_health_smoke() {
     s.client()
         .with_correlation_id("test-corr-123")
         .unwrap()
-        .health()
+        .livez()
         .await
         .unwrap();
 }
@@ -50,7 +50,7 @@ async fn without_correlation_id_works() {
         .with_correlation_id("temp")
         .unwrap()
         .without_correlation_id();
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
 }
 
 #[tokio::test]
@@ -63,7 +63,7 @@ async fn correlation_id_builder_smoke_across_endpoints() {
         .build()
         .unwrap();
 
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
     let _version = client.version().await.unwrap();
 
     let batch = AuthorizeRequest::single(alice_view_photo());

@@ -1,4 +1,4 @@
-//! Types for the Treetop REST API, wire-compatible with treetop-core and treetop-rest v0.0.7.
+//! Types for the Treetop REST API, wire-compatible with treetop-core and treetop-rest 0.1.0.
 
 mod action;
 mod policy;
