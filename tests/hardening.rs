@@ -23,11 +23,11 @@ fn brief_response() -> serde_json::Value {
             "status": "success",
             "result": {
                 "decision": "Allow",
-                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                 "policy_id": "policy0"
             }
         }],
-        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
         "successful": 1,
         "failed": 0
     })
@@ -137,7 +137,7 @@ fn context_validation_uses_reported_server_limits() {
 
     let error = request
         .validate_context(RequestLimits {
-            max_batch_size: None,
+            max_batch_size: 1024,
             max_context_bytes: usize::MAX,
             max_context_depth: usize::MAX,
             max_context_keys: 1,
@@ -159,7 +159,7 @@ fn context_validation_checks_size_and_depth() {
 
     let size_error = request
         .validate_context(RequestLimits {
-            max_batch_size: None,
+            max_batch_size: 1024,
             max_context_bytes: 1,
             max_context_depth: usize::MAX,
             max_context_keys: usize::MAX,
@@ -172,7 +172,7 @@ fn context_validation_checks_size_and_depth() {
 
     let depth_error = request
         .validate_context(RequestLimits {
-            max_batch_size: None,
+            max_batch_size: 1024,
             max_context_bytes: usize::MAX,
             max_context_depth: 2,
             max_context_keys: usize::MAX,
@@ -259,12 +259,12 @@ async fn base_url_path_prefix_is_preserved() {
         .build()
         .unwrap();
     Mock::given(method("GET"))
-        .and(path("/service/api/v1/health"))
+        .and(path("/service/livez"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
 
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
 }
 
 #[tokio::test]
@@ -294,13 +294,13 @@ async fn health_response_bodies_are_drained_and_bounded() {
         .build()
         .unwrap();
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .respond_with(ResponseTemplate::new(200).set_body_string("12345"))
         .mount(&server)
         .await;
 
     assert!(matches!(
-        client.health().await,
+        client.livez().await,
         Err(TreetopError::ResponseTooLarge { limit: 4 })
     ));
 }
@@ -430,7 +430,7 @@ async fn upload_bodies_are_bounded_before_transport() {
 async fn request_context_limits_are_enforced_before_transport() {
     let client = Client::builder("http://localhost")
         .request_limits(RequestLimits {
-            max_batch_size: None,
+            max_batch_size: 1024,
             max_context_bytes: usize::MAX,
             max_context_depth: usize::MAX,
             max_context_keys: 0,
@@ -511,7 +511,7 @@ async fn default_client_does_not_follow_redirects() {
     let server = MockServer::start().await;
     let client = Client::builder(server.uri()).build().unwrap();
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .respond_with(ResponseTemplate::new(302).insert_header("Location", "/target"))
         .mount(&server)
         .await;
@@ -522,7 +522,7 @@ async fn default_client_does_not_follow_redirects() {
         .await;
 
     assert!(matches!(
-        client.health().await,
+        client.livez().await,
         Err(TreetopError::Api { status, .. }) if status.as_u16() == 302
     ));
 }

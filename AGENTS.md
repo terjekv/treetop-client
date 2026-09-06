@@ -27,15 +27,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 
 - Run `cargo test --all-features` when client transport behavior, endpoint behavior, or server-facing
   types change. This requires Docker and exercises the full suite against the current target server.
-- Run the compatibility contract against a specific supported server with:
-
-  ```bash
-  TREETOP_TEST_IMAGE=ghcr.io/treetop-policy-engine/treetop-rest:vX.Y.Z \
-    cargo test --features server-tests --test server_compat
-  ```
-
-- The supported compatibility matrix is defined in `.github/workflows/ci.yml`. Update the matrix,
-  README, documentation, and tests together when changing the supported server range.
+- Run the current contract against the pinned release image with `TREETOP_TEST_IMAGE` and
+  `cargo test --features server-tests --test server_contract`.
+- CI tests the exact coordinated REST release. Update that pin, README, docs, and
+  tests together; no historical compatibility matrix or legacy defaults are retained.
 - Run `cargo audit --deny warnings` and
   `cargo deny check advisories bans licenses sources` after dependency or policy changes.
 - Run `cargo package --locked` for release-related changes and inspect `cargo package --list` when
@@ -62,21 +57,23 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 - Avoid expanding exposure of third-party types unless they are the intentional integration surface.
   Prefer crate-owned validated types at public boundaries.
 
-## Wire Compatibility
+## Strict current wire contract
 
 - Treat `docs/api.md`, server snapshot tests, and released `treetop-rest` behavior as the sources of
   truth for JSON shapes and endpoint semantics.
 - Preserve serde field names, enum tagging, omission rules, defaults, and flattening. A Rust
   round-trip alone is not proof of server compatibility; assert the exact JSON shape.
 - Add serde and wiremock tests for every new or changed request/response shape.
-- Keep newer response fields backward-compatible with older supported servers using defaults only
-  where a missing value has a safe and unambiguous meaning.
+- Prioritize correctness and strict, uniform project contracts over compatibility.
+  Require current metadata and remove obsolete defaults, aliases, and deprecated APIs.
+  Document concrete breaking migration steps. Exact unmerged candidate pins are
+  permitted for coordinated verification; merging and releasing require user approval.
 - Preserve explicit unknown/fallback enum variants where newer servers may add values. Do not turn
   forward-compatible server additions into deserialization failures without a deliberate reason.
 - Validate response counts, indices, policy versions, and other cross-field invariants before
   returning data to callers.
 - When targeting a new server release, compare its API and snapshots, update `docs/api.md`, README
-  compatibility text, the CI matrix, structured tests, and full server tests in the same change.
+  current-contract text, the CI release pin, structured tests, and full server tests in the same change.
 
 ## Security Boundaries
 
@@ -121,7 +118,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
   `tests/integration.rs` or another focused integration-test file and use `wiremock`.
 - Add property tests for invariants with broad structured input spaces and fuzz targets for parsers
   or other hostile-input boundaries.
-- Add full server tests for behavior that a mock cannot establish, and compatibility tests for the
+- Add full server tests for behavior that a mock cannot establish, and current-contract tests for the
   stable contract shared by all supported server releases.
 - Tests that start local mock servers require permission to bind loopback ports. A sandbox denial is
   an environment failure, not a product-test failure; rerun in an environment that permits binding.

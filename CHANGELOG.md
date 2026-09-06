@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.1.0] - 2026-09-06
 
-- Verify the complete endpoint suite against REST v0.0.16 and extend the stable
-  compatibility matrix through v0.0.16. Live authorization checks compare every
-  policy-version field with the server version endpoint.
+### Breaking changes
+
+- `VersionInfo.schema` now uses the distinct `SchemaVersion` type (`hash`, `loaded_at`). It does not manufacture policy generation or label metadata for a schema revision. REST and Core version strings are package versions without `v`.
+
+- Target the coordinated REST 0.1.0 contract and its declared label scopes. Require
+  every policy-version field, current status metadata, batch limits, and policy
+  match metadata. `label_set` accepts explicit null; missing fields fail parsing.
+- Remove deprecated `try_*` forwarding constructors/builders and `health()`.
+  Use the canonical fallible constructors/builders, `livez()`, and `readyz()`.
+- Reject legacy bare-string metadata sources; use `{ "url": "https://..." }`.
+  Schema metadata and schema-validation mode are required in status responses.
+- Remove historical server matrices and compatibility defaults. CI tests the
+  complete endpoint suite against the immutable REST 0.1.0 release image. Keep package
+  contents scoped to library sources and public documentation.
+- See [MIGRATION.md](MIGRATION.md) for the coordinated configuration, API, and
+  metadata migration.
 
 ## [0.0.4] - 2026-09-05
 
@@ -166,7 +179,8 @@ Targets
 - Tag-driven crates.io and GitHub release automation, including first-release token bootstrap and
   subsequent OIDC trusted publishing.
 
-[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.4...v0.1.0
 [0.0.4]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.3
 [0.0.2]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.2

@@ -4,10 +4,9 @@ This document describes the exact JSON wire format for all request and response
 types exchanged between `treetop-client` and a Treetop REST server. Use this as
 a reference when debugging or building interoperable clients.
 
-The complete endpoint suite targets REST v0.0.16. CI also checks the stable contract
-against every release from v0.0.4 through v0.0.16. The v0.0.16 policy version retains
-the label-configuration identifier and engine generation alongside the policy hash
-and load time; older responses use the documented defaults.
+The complete endpoint suite targets the coordinated REST 0.1.0 contract and tests
+an immutable release image. All policy-version fields and
+current status capabilities are required; old-server defaults are removed.
 
 Application endpoints live under `/api/v1/`. Operational endpoints live at `/livez`, `/readyz`,
 `/openapi.json`, and `/metrics`.
@@ -19,7 +18,6 @@ Application endpoints live under `/api/v1/`. Operational endpoints live at `/liv
 | GET | `/livez` | `livez()` | Plain text (discarded after validation) |
 | GET | `/readyz` | `readyz()` | `bool` from HTTP 200/503 |
 | GET | `/openapi.json` | `openapi()` | `serde_json::Value` |
-| GET | `/api/v1/health` | `health()` | `{}` (empty) |
 | GET | `/api/v1/version` | `version()` | `VersionInfo` |
 | GET | `/api/v1/status` | `status()` | `StatusResponse` |
 | POST | `/api/v1/authorize?detail=brief` | `authorization().send()` / `authorize()` | `AuthorizeBriefResponse` |
@@ -71,7 +69,7 @@ use `Validation`/`RequestTooLarge`, `ResponseTooLarge`, `InvalidTextResponse`, a
 is redacted before an `Api` error is returned.
 
 The default client buffers at most 16 MiB for a request or successful body and 64 KiB for an error.
-Successful health and operational-probe bodies are drained and bounded; `/livez` and `/readyz`
+Successful operational-probe bodies are drained and bounded; `/livez` and `/readyz`
 also require valid UTF-8. Configure the request and successful-response limits with
 `ClientBuilder::max_request_bytes()` and `ClientBuilder::max_response_bytes()`.
 
@@ -82,11 +80,31 @@ also require valid UTF-8. Configure the request and successful-response limits w
 Externally tagged enum -- either `User` or `Group`:
 
 ```json
-{ "User": { "id": "alice", "namespace": ["MyApp"], "groups": [{ "id": "admins", "namespace": [] }] } }
+{
+  "User": {
+    "id": "alice",
+    "namespace": [
+      "MyApp"
+    ],
+    "groups": [
+      {
+        "id": "admins",
+        "namespace": []
+      }
+    ]
+  }
+}
 ```
 
 ```json
-{ "Group": { "id": "admins", "namespace": ["MyApp"] } }
+{
+  "Group": {
+    "id": "admins",
+    "namespace": [
+      "MyApp"
+    ]
+  }
+}
 ```
 
 ### User
@@ -96,8 +114,14 @@ Externally tagged enum -- either `User` or `Group`:
   "id": "alice",
   "namespace": [],
   "groups": [
-    { "id": "admins", "namespace": [] },
-    { "id": "editors", "namespace": [] }
+    {
+      "id": "admins",
+      "namespace": []
+    },
+    {
+      "id": "editors",
+      "namespace": []
+    }
   ]
 }
 ```
@@ -111,7 +135,9 @@ Externally tagged enum -- either `User` or `Group`:
 ```json
 {
   "id": "admins",
-  "namespace": ["MyApp"]
+  "namespace": [
+    "MyApp"
+  ]
 }
 ```
 
@@ -123,7 +149,9 @@ Externally tagged enum -- either `User` or `Group`:
 ```json
 {
   "id": "create_host",
-  "namespace": ["DNS"]
+  "namespace": [
+    "DNS"
+  ]
 }
 ```
 
@@ -137,11 +165,31 @@ Externally tagged enum -- either `User` or `Group`:
   "kind": "Host",
   "id": "web-01.example.com",
   "attrs": {
-    "ip": { "type": "Ip", "value": "10.0.0.1" },
-    "environment": { "type": "String", "value": "production" },
-    "critical": { "type": "Bool", "value": true },
-    "priority": { "type": "Long", "value": 1 },
-    "tags": { "type": "Set", "value": [{ "type": "String", "value": "web" }] }
+    "ip": {
+      "type": "Ip",
+      "value": "10.0.0.1"
+    },
+    "environment": {
+      "type": "String",
+      "value": "production"
+    },
+    "critical": {
+      "type": "Bool",
+      "value": true
+    },
+    "priority": {
+      "type": "Long",
+      "value": 1
+    },
+    "tags": {
+      "type": "Set",
+      "value": [
+        {
+          "type": "String",
+          "value": "web"
+        }
+      ]
+    }
   }
 }
 ```
@@ -168,9 +216,21 @@ A single authorization check (principal + action + resource):
 
 ```json
 {
-  "principal": { "User": { "id": "alice", "namespace": [], "groups": [] } },
-  "action": { "id": "view", "namespace": [] },
-  "resource": { "kind": "Document", "id": "doc-42" }
+  "principal": {
+    "User": {
+      "id": "alice",
+      "namespace": [],
+      "groups": []
+    }
+  },
+  "action": {
+    "id": "view",
+    "namespace": []
+  },
+  "resource": {
+    "kind": "Document",
+    "id": "doc-42"
+  }
 }
 ```
 
@@ -183,11 +243,26 @@ A `Request` with an optional client-provided correlation ID and optional request
 {
   "id": "check-1",
   "context": {
-    "env": { "type": "String", "value": "prod" }
+    "env": {
+      "type": "String",
+      "value": "prod"
+    }
   },
-  "principal": { "User": { "id": "alice", "namespace": [], "groups": [] } },
-  "action": { "id": "view", "namespace": [] },
-  "resource": { "kind": "Document", "id": "doc-42" }
+  "principal": {
+    "User": {
+      "id": "alice",
+      "namespace": [],
+      "groups": []
+    }
+  },
+  "action": {
+    "id": "view",
+    "namespace": []
+  },
+  "resource": {
+    "kind": "Document",
+    "id": "doc-42"
+  }
 }
 ```
 
@@ -200,14 +275,38 @@ The request body for `POST /api/v1/authorize`:
   "requests": [
     {
       "id": "check-1",
-      "principal": { "User": { "id": "alice", "namespace": [], "groups": [] } },
-      "action": { "id": "view", "namespace": [] },
-      "resource": { "kind": "Document", "id": "doc-42" }
+      "principal": {
+        "User": {
+          "id": "alice",
+          "namespace": [],
+          "groups": []
+        }
+      },
+      "action": {
+        "id": "view",
+        "namespace": []
+      },
+      "resource": {
+        "kind": "Document",
+        "id": "doc-42"
+      }
     },
     {
-      "principal": { "User": { "id": "bob", "namespace": [], "groups": [] } },
-      "action": { "id": "edit", "namespace": [] },
-      "resource": { "kind": "Document", "id": "doc-42" }
+      "principal": {
+        "User": {
+          "id": "bob",
+          "namespace": [],
+          "groups": []
+        }
+      },
+      "action": {
+        "id": "edit",
+        "namespace": []
+      },
+      "resource": {
+        "kind": "Document",
+        "id": "doc-42"
+      }
     }
   ]
 }
@@ -237,7 +336,9 @@ Response from `POST /api/v1/authorize?detail=brief`:
         "policy_id": "default-permit",
         "version": {
           "hash": "c82d1168...",
-          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+          "loaded_at": "2025-12-19T00:14:38.577289000Z",
+          "label_set": null,
+          "generation": 0
         }
       }
     },
@@ -249,7 +350,9 @@ Response from `POST /api/v1/authorize?detail=brief`:
         "policy_id": "",
         "version": {
           "hash": "c82d1168...",
-          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+          "loaded_at": "2025-12-19T00:14:38.577289000Z",
+          "label_set": null,
+          "generation": 0
         }
       }
     },
@@ -261,7 +364,9 @@ Response from `POST /api/v1/authorize?detail=brief`:
   ],
   "version": {
     "hash": "c82d1168...",
-    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+    "loaded_at": "2025-12-19T00:14:38.577289000Z",
+    "label_set": null,
+    "generation": 0
   },
   "successful": 2,
   "failed": 1
@@ -295,7 +400,10 @@ Response from `POST /api/v1/authorize?detail=full`:
         "policy": [
           {
             "literal": "permit(principal == User::\"alice\", action, resource);",
-            "json": { "effect": "permit", "...": "..." },
+            "json": {
+              "effect": "permit",
+              "...": "..."
+            },
             "annotation_id": "allow-alice",
             "cedar_id": "policy0"
           }
@@ -303,14 +411,18 @@ Response from `POST /api/v1/authorize?detail=full`:
         "decision": "Allow",
         "version": {
           "hash": "c82d1168...",
-          "loaded_at": "2025-12-19T00:14:38.577289000Z"
+          "loaded_at": "2025-12-19T00:14:38.577289000Z",
+          "label_set": null,
+          "generation": 0
         }
       }
     }
   ],
   "version": {
     "hash": "c82d1168...",
-    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+    "loaded_at": "2025-12-19T00:14:38.577289000Z",
+    "label_set": null,
+    "generation": 0
   },
   "successful": 1,
   "failed": 0
@@ -352,8 +464,8 @@ Appears in authorization responses and version info:
 }
 ```
 
-`label_set` is nullable. Older servers may omit it and `generation`; the client
-defaults them to `None` and `0`. Generation is local to an engine instance and
+`label_set` is nullable but required. `generation` is a required unsigned 64-bit
+integer. Generation is local to an engine instance and
 can restart when the server replaces that engine. Batch validation compares
 all four fields, including the label identifier and generation.
 
@@ -370,7 +482,9 @@ Response from `GET /api/v1/version`:
   },
   "policies": {
     "hash": "c82d1168...",
-    "loaded_at": "2025-12-19T00:14:38.577289000Z"
+    "loaded_at": "2025-12-19T00:14:38.577289000Z",
+    "label_set": null,
+    "generation": 0
   }
 }
 ```
@@ -387,7 +501,9 @@ Response from `GET /api/v1/status`:
       "timestamp": "2025-12-19T00:14:38.577289000Z",
       "sha256": "c82d1168...",
       "size": 2049,
-      "source": { "url": "https://example.com/policies.cedar" },
+      "source": {
+        "url": "https://example.com/policies.cedar"
+      },
       "refresh_frequency": 300,
       "entries": 42,
       "content": "permit(...);\nforbid(...);"
@@ -423,12 +539,10 @@ Response from `GET /api/v1/status`:
 
 The `source` and `refresh_frequency` fields are optional (omitted when policies
 were loaded from a file rather than a URL). `source` is a `MetadataSource` endpoint object; its URL
-is available through `MetadataSource::as_str()`. The client also accepts the legacy bare-string
-snapshot representation while serializing the canonical endpoint object. The
-`parallel_configuration` field is represented as opaque JSON (`serde_json::Value`) since its shape
-may vary between server versions. Servers before v0.0.7 omit `request_limits` and
-`request_context`; omitted context support safely defaults to unsupported. An omitted
-`max_batch_size` is represented as `None` for legacy servers with unlimited batches.
+is available through `MetadataSource::as_str()`. Bare-string sources are rejected.
+`parallel_configuration` is opaque JSON (`serde_json::Value`). Status always includes
+schema metadata, the validation mode, `request_limits`, and `request_context`.
+`max_batch_size` is a required unsigned integer; no unlimited legacy default is inferred.
 
 ### Metadata
 
@@ -439,7 +553,9 @@ Appears within `StatusResponse` and `PoliciesDownload`:
   "timestamp": "2025-12-19T00:14:38.577289000Z",
   "sha256": "c82d116854d77bf689c3d15e167764876dffe869c970bc08ab7c5dacd7726219",
   "size": 2049,
-  "source": { "url": "https://example.com/policies.cedar" },
+  "source": {
+    "url": "https://example.com/policies.cedar"
+  },
   "refresh_frequency": 300,
   "entries": 42,
   "content": "permit(...);"
@@ -470,15 +586,29 @@ Response from `GET /api/v1/policies/{user}`:
 {
   "user": "alice",
   "policies": [
-    { "effect": "permit", "principal": { "...": "..." }, "action": { "...": "..." }, "resource": { "...": "..." } },
-    { "effect": "permit", "...": "..." }
+    {
+      "effect": "permit",
+      "principal": {
+        "...": "..."
+      },
+      "action": {
+        "...": "..."
+      },
+      "resource": {
+        "...": "..."
+      }
+    },
+    {
+      "effect": "permit",
+      "...": "..."
+    }
   ]
 }
 ```
 
 The `policies` array contains each matching policy in Cedar JSON format.
 The optional `matches` array contains the corresponding Cedar policy ID and match reasons; it
-defaults to an empty array for older supported servers.
+is required; older responses that omit it are rejected.
 
 ### PoliciesMetadata
 

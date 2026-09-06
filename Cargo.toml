@@ -1,6 +1,6 @@
 [package]
 name = "treetop-client"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2024"
 description = "Typed async Rust client for Treetop policy authorization servers"
 license = "MIT"
@@ -12,7 +12,7 @@ authors = ["Terje Kvernes"]
 keywords = ["authorization", "cedar", "policy", "treetop"]
 categories = ["api-bindings", "authentication"]
 rust-version = "1.85"
-exclude = ["fuzz/**"]
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "CHANGELOG.md", "docs/**", "MIGRATION.md"]
 
 [features]
 server-tests = []

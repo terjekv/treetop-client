@@ -34,11 +34,11 @@ fn brief_response(decision: &str, policy_id: &str) -> serde_json::Value {
             "status": "success",
             "result": {
                 "decision": decision,
-                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                 "policy_id": policy_id
             }
         }],
-        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
         "successful": 1,
         "failed": 0
     })
@@ -47,6 +47,8 @@ fn brief_response(decision: &str, policy_id: &str) -> serde_json::Value {
 fn policies_metadata_json() -> serde_json::Value {
     json!({
         "allow_upload": true,
+    "schema_validation_mode": "permissive",
+    "schema": {"timestamp":"2026-01-01T00:00:00Z","sha256":"empty","size":0,"entries":0,"content":""},
         "policies": {
             "timestamp": "2026-01-01T00:00:00Z",
             "sha256": "new-hash",
@@ -72,24 +74,24 @@ fn policies_metadata_json() -> serde_json::Value {
 async fn health_returns_ok_on_200() {
     let (server, client) = setup().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&server)
         .await;
 
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
 }
 
 #[tokio::test]
 async fn health_returns_error_on_500() {
     let (server, client) = setup().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .respond_with(ResponseTemplate::new(500).set_body_json(json!({"error": "down"})))
         .mount(&server)
         .await;
 
-    let err = client.health().await.unwrap_err();
+    let err = client.livez().await.unwrap_err();
     match err {
         TreetopError::Api { status, .. } => assert_eq!(status.as_u16(), 500),
         _ => panic!("expected Api error, got: {err:?}"),
@@ -171,8 +173,8 @@ async fn version_deserializes_response() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "version": "0.2.0",
             "core": { "version": "0.4.0", "cedar": "4.2.0" },
-            "policies": { "hash": "deadbeef", "loaded_at": "2026-01-01T00:00:00Z" },
-            "schema": { "hash": "beadfeed", "loaded_at": "2026-01-01T00:00:01Z" }
+            "policies": { "hash": "deadbeef", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
+            "schema": { "hash": "beadfeed", "loaded_at": "2026-01-01T00:00:01Z", "label_set": null, "generation": 0}
         })))
         .mount(&server)
         .await;
@@ -199,6 +201,8 @@ async fn status_deserializes_response() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "policy_configuration": {
                 "allow_upload": true,
+"schema_validation_mode": "permissive",
+"schema": {"timestamp":"2026-01-01T00:00:00Z","sha256":"empty","size":0,"entries":0,"content":""},
                 "policies": {
                     "timestamp": "2026-01-01T00:00:00Z",
                     "sha256": "abc",
@@ -214,7 +218,8 @@ async fn status_deserializes_response() {
                     "content": ""
                 }
             },
-            "parallel_configuration": { "cpu_count": 4 }
+            "request_limits":{"max_batch_size":1024,"max_context_bytes":16384,"max_context_depth":8,"max_context_keys":64},
+"parallel_configuration": { "cpu_count": 4 }
             ,
             "request_context": {
                 "supported": true,
@@ -317,11 +322,11 @@ async fn authorize_with_context_sends_context() {
                 "status": "success",
                 "result": {
                     "decision": "Allow",
-                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                     "policy_id": "p1"
                 }
             }],
-            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 1,
             "failed": 0
         })))
@@ -364,10 +369,10 @@ async fn authorize_detailed_sends_detail_full() {
                         "cedar_id": "policy0"
                     }],
                     "decision": "Allow",
-                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" }
+                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0}
                 }
             }],
-            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 1,
             "failed": 0
         })))
@@ -494,7 +499,7 @@ async fn is_allowed_returns_error_on_failed_result() {
                 "status": "failed",
                 "error": "invalid principal format"
             }],
-            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 0,
             "failed": 1
         })))
@@ -527,13 +532,13 @@ async fn correlation_id_sent_as_header() {
     let traced = client.with_correlation_id("req-abc-123").unwrap();
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .and(header("x-correlation-id", "req-abc-123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&server)
         .await;
 
-    traced.health().await.unwrap();
+    traced.livez().await.unwrap();
 }
 
 #[tokio::test]
@@ -545,13 +550,13 @@ async fn builder_correlation_id_sent_on_all_requests() {
         .unwrap();
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .and(header("x-correlation-id", "build-time-id"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&server)
         .await;
 
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
 }
 
 #[tokio::test]
@@ -561,13 +566,13 @@ async fn without_correlation_id_removes_header() {
     let untraced = traced.without_correlation_id();
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .expect(1)
         .mount(&server)
         .await;
 
-    untraced.health().await.unwrap();
+    untraced.livez().await.unwrap();
 }
 
 // ==========================================================================
@@ -751,7 +756,7 @@ async fn get_user_policies_with_filters() {
         .and(query_param("namespaces[]", "DNS"))
         .and(query_param("groups[]", "admins"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "user": "alice",
+            "user": "alice", "matches": [],
             "policies": [{"effect": "permit"}]
         })))
         .mount(&server)
@@ -778,7 +783,7 @@ async fn user_policies_with_empty_groups_and_namespaces() {
     Mock::given(method("GET"))
         .and(path("/api/v1/policies/alice"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "user": "alice",
+            "user": "alice", "matches": [],
             "policies": []
         })))
         .mount(&server)
@@ -846,7 +851,7 @@ async fn user_policies_encodes_user_in_path(
     Mock::given(method("GET"))
         .and(path(expected_path))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "user": user,
+            "user": user, "matches": [],
             "policies": []
         })))
         .mount(&server)
@@ -877,7 +882,7 @@ async fn user_policies_encodes_query_params(
         .and(path(format!("/api/v1/policies/{user}")))
         .and(query_param(param_key, param_value))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "user": user,
+            "user": user, "matches": [],
             "policies": []
         })))
         .mount(&server)
@@ -992,7 +997,7 @@ async fn batch_with_mixed_success_and_failure() {
                     "status": "success",
                     "result": {
                         "decision": "Allow",
-                        "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+                        "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                         "policy_id": "p1"
                     }
                 },
@@ -1003,7 +1008,7 @@ async fn batch_with_mixed_success_and_failure() {
                     "error": "invalid resource type"
                 }
             ],
-            "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+            "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 1,
             "failed": 1
         })))
@@ -1122,12 +1127,12 @@ async fn builder_with_reqwest_client_escape_hatch() {
         .unwrap();
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/health"))
+        .and(path("/livez"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&server)
         .await;
 
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
 }
 
 // ==========================================================================
@@ -1164,7 +1169,7 @@ async fn version_ignores_extra_fields() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "version": "0.2.0",
             "core": { "version": "0.4.0", "cedar": "4.2.0", "extra_field": true },
-            "policies": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "serial": 42 },
+            "policies": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "new_top_level": "hello"
         })))
         .mount(&server)
@@ -1208,13 +1213,13 @@ fn authorize_response_with_extra_fields() {
             "status": "success",
             "result": {
                 "decision": "Allow",
-                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                 "policy_id": "p1",
                 "extra": "ignored"
             },
             "extra_result_field": 123
         }],
-        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
         "successful": 1,
         "failed": 0,
         "extra_response_field": true
@@ -1235,11 +1240,11 @@ fn find_by_id_returns_none_for_missing_id() {
             "status": "success",
             "result": {
                 "decision": "Allow",
-                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+                "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                 "policy_id": "p1"
             }
         }],
-        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+        "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
         "successful": 1,
         "failed": 0
     });
@@ -1257,7 +1262,7 @@ fn response_into_iterator() {
                 "status": "success",
                 "result": {
                     "decision": "Allow",
-                    "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+                    "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                     "policy_id": "p1"
                 }
             },
@@ -1267,12 +1272,12 @@ fn response_into_iterator() {
                 "status": "success",
                 "result": {
                     "decision": "Deny",
-                    "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+                    "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                     "policy_id": ""
                 }
             }
         ],
-        "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+        "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
         "successful": 2,
         "failed": 0
     });
@@ -1297,11 +1302,11 @@ fn into_results_gives_ownership() {
             "status": "success",
             "result": {
                 "decision": "Allow",
-                "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+                "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
                 "policy_id": "p1"
             }
         }],
-        "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z" },
+        "version": { "hash": "h", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
         "successful": 1,
         "failed": 0
     });
@@ -1373,10 +1378,10 @@ async fn detailed_response_with_no_annotation_id() {
                         "cedar_id": "policy0"
                     }],
                     "decision": "Allow",
-                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" }
+                    "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0}
                 }
             }],
-            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z" },
+            "version": { "hash": "abc", "loaded_at": "2026-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "successful": 1,
             "failed": 0
         })))

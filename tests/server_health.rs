@@ -8,7 +8,7 @@ use treetop_client::RequestContextFallbackReason;
 #[tokio::test]
 async fn health_returns_ok() {
     let s = server().await;
-    s.client().health().await.unwrap();
+    s.client().livez().await.unwrap();
 }
 
 #[tokio::test]
@@ -73,7 +73,7 @@ async fn status_reports_schema_defaults() {
         "default schema_validation_mode should be permissive"
     );
     assert!(
-        status.policy_configuration.schema.is_some(),
+        !status.policy_configuration.schema.timestamp.is_empty(),
         "the target server should include schema metadata"
     );
 }
@@ -104,7 +104,7 @@ async fn status_has_parallel_config() {
 async fn status_has_request_limits() {
     let s = server().await;
     let status = s.client().status().await.unwrap();
-    assert_eq!(status.request_limits.max_batch_size, Some(1024));
+    assert_eq!(status.request_limits.max_batch_size, 1024);
     assert_eq!(status.request_limits.max_context_bytes, 16 * 1024);
     assert_eq!(status.request_limits.max_context_depth, 8);
     assert_eq!(status.request_limits.max_context_keys, 64);

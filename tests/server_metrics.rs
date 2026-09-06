@@ -44,7 +44,7 @@ async fn metrics_returns_prometheus_format() {
 #[serial]
 async fn metrics_contains_http_request_metrics() {
     let s = server().await;
-    s.client().health().await.unwrap();
+    s.client().livez().await.unwrap();
 
     let text = s.client().metrics().await.unwrap();
     assert!(
@@ -53,7 +53,7 @@ async fn metrics_contains_http_request_metrics() {
             "http_requests_total",
             &[
                 ("method", "GET"),
-                ("path", "/api/v1/health"),
+                ("path", "/livez"),
                 ("status_code", "200"),
             ],
         ) >= 1,
@@ -111,18 +111,18 @@ async fn policy_eval_counter_increments() {
         "http_requests_total",
         &[
             ("method", "GET"),
-            ("path", "/api/v1/health"),
+            ("path", "/livez"),
             ("status_code", "200"),
         ],
     );
-    client.health().await.unwrap();
+    client.livez().await.unwrap();
 
     let after = counter_value(
         &client.metrics().await.unwrap(),
         "http_requests_total",
         &[
             ("method", "GET"),
-            ("path", "/api/v1/health"),
+            ("path", "/livez"),
             ("status_code", "200"),
         ],
     );

@@ -33,26 +33,11 @@ impl Action {
         Ok(action)
     }
 
-    /// Creates and validates a new action with no namespace.
-    #[deprecated(since = "0.0.2", note = "Action::new now validates its input")]
-    pub fn try_new(id: impl Into<String>) -> Result<Self, ValidationError> {
-        Self::new(id)
-    }
-
     /// Sets and validates the Cedar namespace for this action.
     pub fn with_namespace(mut self, namespace: Vec<String>) -> Result<Self, ValidationError> {
         self.namespace = Namespace::new(namespace);
         self.validate()?;
         Ok(self)
-    }
-
-    /// Sets and validates the Cedar namespace for this action.
-    #[deprecated(
-        since = "0.0.2",
-        note = "Action::with_namespace now validates its input"
-    )]
-    pub fn try_with_namespace(self, namespace: Vec<String>) -> Result<Self, ValidationError> {
-        self.with_namespace(namespace)
     }
 
     /// Returns the action entity identifier.
