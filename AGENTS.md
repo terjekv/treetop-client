@@ -27,9 +27,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 
 - Run `cargo test --all-features` when client transport behavior, endpoint behavior, or server-facing
   types change. This requires Docker and exercises the full suite against the current target server.
-- Run the current contract against the pinned candidate with `TREETOP_TEST_IMAGE` and
+- Run the current contract against the pinned release image with `TREETOP_TEST_IMAGE` and
   `cargo test --features server-tests --test server_contract`.
-- CI tests the exact coordinated REST candidate. Update that pin, README, docs, and
+- CI tests the exact coordinated REST release. Update that pin, README, docs, and
   tests together; no historical compatibility matrix or legacy defaults are retained.
 - Run `cargo audit --deny warnings` and
   `cargo deny check advisories bans licenses sources` after dependency or policy changes.
@@ -73,7 +73,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 - Validate response counts, indices, policy versions, and other cross-field invariants before
   returning data to callers.
 - When targeting a new server release, compare its API and snapshots, update `docs/api.md`, README
-  current-contract text, the CI candidate pin, structured tests, and full server tests in the same change.
+  current-contract text, the CI release pin, structured tests, and full server tests in the same change.
 
 ## Security Boundaries
 

@@ -21,10 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject legacy bare-string metadata sources; use `{ "url": "https://..." }`.
   Schema metadata and schema-validation mode are required in status responses.
 - Remove historical server matrices and compatibility defaults. CI tests the
-  complete endpoint suite against an exact unmerged REST candidate. Keep package
+  complete endpoint suite against the immutable REST 0.1.0 release image. Keep package
   contents scoped to library sources and public documentation.
 - See [MIGRATION.md](MIGRATION.md) for the coordinated configuration, API, and
-  metadata migration. No merge or publication is authorized before approval.
+  metadata migration.
 
 ## [0.0.4] - 2026-09-05
 
@@ -179,7 +179,8 @@ Targets
 - Tag-driven crates.io and GitHub release automation, including first-release token bootstrap and
   subsequent OIDC trusted publishing.
 
-[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.4...v0.1.0
 [0.0.4]: https://github.com/treetop-policy-engine/treetop-client/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.3
 [0.0.2]: https://github.com/treetop-policy-engine/treetop-client/releases/tag/v0.0.2

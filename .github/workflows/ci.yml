@@ -28,22 +28,15 @@ jobs:
       - run: cargo test --locked --doc
 
   server-current:
-    name: Current server integration (0.1.0 candidate)
+    name: Current server integration (0.1.0 release)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TREETOP_TEST_IMAGE: treetop-rest-candidate:0.1.0
+      TREETOP_TEST_IMAGE: ghcr.io/treetop-policy-engine/treetop-rest@sha256:d1fdd7536f31dde0b922f9516baa16a1f5ee7ecd4ab1c0892afd555128acc43e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check out exact REST candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: treetop-policy-engine/treetop-rest
-          ref: fce2e1fa8f44244c201dd87731ba63e5f203a8e0
-          path: .candidate-rest
-          persist-credentials: false
-      - name: Build candidate server
-        run: docker build -t "$TREETOP_TEST_IMAGE" .candidate-rest
+      - name: Pull verified REST release image
+        run: docker pull "$TREETOP_TEST_IMAGE"
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: stable

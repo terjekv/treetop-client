@@ -34,12 +34,11 @@ attribute tuple. Scope controls sanitization too: a labeler for `App::Host.label
 does not clear `Other::Host.labels`. Constrain resource types in policies before
 trusting derived labels. Invalid configuration and failed reloads fail closed.
 
-## Candidate verification
+## Release verification
 
-CI builds the exact REST candidate pinned in its workflow and runs the full
-server suite against it. After approval, release Core, Bundle, and REST before
-publishing this SDK and upgrading CLI consumers. Do not merge or release before
-user approval.
+CI runs the full server suite against the immutable REST 0.1.0 release image
+pinned in its workflow. Release Core, Bundle, and REST before publishing this SDK
+and upgrading CLI consumers to its crates.io package.
 
 `VersionInfo.schema` now uses the distinct `SchemaVersion` type (`hash`,
 `loaded_at`). It does not manufacture policy generation or label metadata for a

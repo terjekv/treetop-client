@@ -49,7 +49,7 @@ If an external service or tool is unavailable, state exactly which check remains
 - Add or update a `cargo-fuzz` target for parsers and other untrusted-input boundaries.
 
 The `TREETOP_TEST_IMAGE` environment variable selects the container image used by server tests.
-CI runs the full current contract against the exact REST candidate pinned in the workflow.
+CI runs the full current contract against the immutable REST release image pinned in the workflow.
 Historical server matrices are removed; breaking migrations must be documented.
 
 ### Wire compatibility

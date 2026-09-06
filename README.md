@@ -11,7 +11,7 @@ authorization requests, managing policies, and querying server status.
 Version 0.1.0 targets the coordinated REST 0.1.0 contract. Early releases prioritize
 correctness over compatibility: deprecated APIs, legacy endpoint methods, omitted
 metadata defaults, and old-server matrices are removed. See [MIGRATION.md](MIGRATION.md).
-CI runs the full endpoint suite against an exact pinned REST candidate before release.
+CI runs the full endpoint suite against an immutable REST 0.1.0 release image.
 
 ## Features
 

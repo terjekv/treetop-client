@@ -5,7 +5,7 @@ types exchanged between `treetop-client` and a Treetop REST server. Use this as
 a reference when debugging or building interoperable clients.
 
 The complete endpoint suite targets the coordinated REST 0.1.0 contract and tests
-an exact candidate revision before publication. All policy-version fields and
+an immutable release image. All policy-version fields and
 current status capabilities are required; old-server defaults are removed.
 
 Application endpoints live under `/api/v1/`. Operational endpoints live at `/livez`, `/readyz`,

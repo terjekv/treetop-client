@@ -3,5 +3,3 @@
 /fuzz/corpus
 /fuzz/target
 .claude
-
-.candidate-rest/
