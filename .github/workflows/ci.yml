@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: treetop-policy-engine/treetop-rest
-          ref: 316f1a9213b1ed04cd748c66eafb3bf4b4085a9b
+          ref: fce2e1fa8f44244c201dd87731ba63e5f203a8e0
           path: .candidate-rest
           persist-credentials: false
       - name: Build candidate server

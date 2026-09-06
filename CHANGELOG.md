@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `VersionInfo.schema` now uses the distinct `SchemaVersion` type (`hash`, `loaded_at`). It does not manufacture policy generation or label metadata for a schema revision. REST and Core version strings are package versions without `v`.
+
 - Target the coordinated REST 0.1.0 contract and its declared label scopes. Require
   every policy-version field, current status metadata, batch limits, and policy
   match metadata. `label_set` accepts explicit null; missing fields fail parsing.

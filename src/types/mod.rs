@@ -27,4 +27,4 @@ pub use status::{
 };
 pub use validation::{CedarIpAddr, ValidationError};
 pub(crate) use validation::{EntityId, Namespace};
-pub use version::{Core, PolicyVersion, VersionInfo};
+pub use version::{Core, PolicyVersion, SchemaVersion, VersionInfo};

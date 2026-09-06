@@ -49,6 +49,13 @@ async fn upload_schema_enables_schema_backed_context_runtime() {
 
     let downloaded = s.client().get_schema().await.unwrap();
     assert_eq!(downloaded.schema.content, SCHEMA_BACKED_CONTEXT_SCHEMA_JSON);
+    let version = s.client().version().await.unwrap();
+    let schema_version = version.schema.expect("uploaded schema has a revision");
+    assert_eq!(schema_version.hash, downloaded.schema.sha256);
+    assert_eq!(
+        schema_version.loaded_at.replace("+00:00", "Z"),
+        downloaded.schema.timestamp
+    );
 
     let raw = s.client().get_schema_raw().await.unwrap();
     assert_eq!(raw, SCHEMA_BACKED_CONTEXT_SCHEMA_JSON);

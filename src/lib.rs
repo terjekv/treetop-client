@@ -57,6 +57,6 @@ pub use types::{
     BatchResult, CedarIpAddr, Core, DecisionBrief, Group, IndexedResult, Metadata, MetadataSource,
     PermitPolicy, PoliciesDownload, PoliciesMetadata, PolicyMatch, PolicyMatchReason,
     PolicyVersion, Principal, Request, RequestContextFallbackReason, RequestContextStatus,
-    RequestLimits, Resource, SchemaDownload, StatusResponse, User, UserPolicies, ValidationError,
-    VersionInfo,
+    RequestLimits, Resource, SchemaDownload, SchemaVersion, StatusResponse, User, UserPolicies,
+    ValidationError, VersionInfo,
 };

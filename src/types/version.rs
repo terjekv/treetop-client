@@ -44,6 +44,15 @@ pub struct Core {
     pub cedar: String,
 }
 
+/// Identifies loaded schema content, separately from an authorization generation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchemaVersion {
+    /// SHA-256 hash of the schema source.
+    pub hash: String,
+    /// ISO 8601 timestamp of when the schema was loaded.
+    pub loaded_at: String,
+}
+
 /// Full version information returned by the `/api/v1/version` endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VersionInfo {
@@ -55,7 +64,7 @@ pub struct VersionInfo {
     pub policies: PolicyVersion,
     /// The schema version currently loaded in the server, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema: Option<PolicyVersion>,
+    pub schema: Option<SchemaVersion>,
 }
 
 #[cfg(test)]
@@ -101,7 +110,7 @@ mod tests {
                 "loaded_at": "2025-01-01T00:00:00Z", "label_set": null, "generation": 0},
             "schema": {
                 "hash": "schema123",
-                "loaded_at": "2025-01-01T00:00:01Z", "label_set": null, "generation": 0}
+                "loaded_at": "2025-01-01T00:00:01Z"}
         });
 
         let info: VersionInfo = serde_json::from_value(json).unwrap();

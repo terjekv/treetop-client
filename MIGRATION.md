@@ -40,3 +40,7 @@ CI builds the exact REST candidate pinned in its workflow and runs the full
 server suite against it. After approval, release Core, Bundle, and REST before
 publishing this SDK and upgrading CLI consumers. Do not merge or release before
 user approval.
+
+`VersionInfo.schema` now uses the distinct `SchemaVersion` type (`hash`,
+`loaded_at`). It does not manufacture policy generation or label metadata for a
+schema revision. REST and Core version strings are package versions without `v`.
