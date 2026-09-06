@@ -4,6 +4,11 @@ This document describes the exact JSON wire format for all request and response
 types exchanged between `treetop-client` and a Treetop REST server. Use this as
 a reference when debugging or building interoperable clients.
 
+The complete endpoint suite targets REST v0.0.16. CI also checks the stable contract
+against every release from v0.0.4 through v0.0.16. The v0.0.16 policy version retains
+the label-configuration identifier and engine generation alongside the policy hash
+and load time; older responses use the documented defaults.
+
 Application endpoints live under `/api/v1/`. Operational endpoints live at `/livez`, `/readyz`,
 `/openapi.json`, and `/metrics`.
 

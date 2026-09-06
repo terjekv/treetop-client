@@ -28,7 +28,7 @@ jobs:
       - run: cargo test --doc
 
   server-latest:
-    name: Server integration (v0.0.12)
+    name: Server integration (v0.0.16)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        server-version: [v0.0.4, v0.0.5, v0.0.6, v0.0.7, v0.0.8, v0.0.9, v0.0.10, v0.0.11, v0.0.12]
+        server-version: [v0.0.4, v0.0.5, v0.0.6, v0.0.7, v0.0.8, v0.0.9, v0.0.10, v0.0.11, v0.0.12, v0.0.13, v0.0.14, v0.0.15, v0.0.16]
     env:
       TREETOP_TEST_IMAGE: ghcr.io/treetop-policy-engine/treetop-rest:${{ matrix.server-version }}
     steps:
